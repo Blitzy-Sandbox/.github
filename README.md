@@ -101,6 +101,7 @@ Each repository is tagged with its current stage in the Blitzy workflow:
 
 ### The 80/20 Principle
 Blitzy autonomously generates **up to 80%** of your codebase, handling:
+- Business Logic
 - Boilerplate and repetitive patterns
 - Standard CRUD operations
 - API integrations
@@ -109,7 +110,7 @@ Blitzy autonomously generates **up to 80%** of your codebase, handling:
 - Test scaffolding
 - Documentation
 
-The critical **20%** - business logic, edge cases, optimizations, and production polish - remains with human engineers.
+The critical **20%** - edge cases, optimizations, and production polish - remains with human engineers or for refinements to the PR.
 
 ### System 2 AI Thinking
 Unlike traditional AI tools that work in seconds, Blitzy agents engage in **extended reasoning**:
