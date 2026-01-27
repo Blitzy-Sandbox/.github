@@ -6,7 +6,7 @@
 
 # Blitzy Sandbox
 
-### The Vanguard Testing Ground for AI-Native Development
+### The Blitzy Testing Ground for AI-Native Development
 
 *Explore autonomous code generation at scale - production-grade repositories, zero friction*
 
@@ -16,7 +16,7 @@
 
 ## What is Blitzy Sandbox?
 
-Welcome to **Blitzy Sandbox** - the experimentation environment for the Blitzy Vanguard. This organization hosts neutral, production-grade codebases where you can explore AI-native development workflows without complex setup requirements.
+Welcome to **Blitzy Sandbox** - the experimentation environment for Blitzy Explore. This organization hosts neutral, production-grade codebases where you can explore AI-native development workflows without complex setup requirements.
 
 Unlike production workflows, Sandbox projects are:
 - **Standalone repositories**: No connection to your work systems required
@@ -28,7 +28,7 @@ Unlike production workflows, Sandbox projects are:
 
 - **Hands-on Experience**: Work with real codebases in various states of completion
 - **Learning Resources**: Master AI-native development through practical examples
-- **Collaborative Environment**: Share insights and techniques with other Vanguard members
+- **Collaborative Environment**: Share insights and techniques with other Explore members
 - **Experimentation Freedom**: Test prompts, refine workflows, and iterate without risk
 - **Performance Insights**: Track generation quality, build times, and success patterns
 
@@ -64,7 +64,7 @@ Each repository is tagged with its current stage in the Blitzy workflow:
 
 ## Getting Started
 
-### For New Vanguard Members
+### For New Explore Members
 
 **No complex setups required** - start exploring immediately:
 
@@ -146,7 +146,7 @@ This Tech Spec stays **synchronized with your code** as the project evolves.
 
 ## Exploring Code Generation
 
-### Connect with the Vanguard
+### Connect with Explore
 
 - **Discussions**: Share insights, prompts for review, and questions
 - **Direct Support**: sandbox@blitzy.com
@@ -155,7 +155,7 @@ This Tech Spec stays **synchronized with your code** as the project evolves.
 
 ### Contributing to Sandbox
 
-We welcome contributions from all Vanguard members:
+We welcome contributions from all Explore members:
 1. Create a new project
 2. Select Blitzy-Sandbox as the GitHub organization
 3. Choose the repository for your project
@@ -187,7 +187,7 @@ Individual repositories may have different licenses. Check each project's LICENS
 ### Acknowledgments
 
 The Blitzy Sandbox is powered by:
-- **Vanguard Members**: Explorers pushing the boundaries of AI-native development
+- **Explore Members**: Explorers pushing the boundaries of AI-native development
 - **Blitzy Engineering**: Building the future of software development
 - **Open Source Community**: Technologies that make it all possible
 
