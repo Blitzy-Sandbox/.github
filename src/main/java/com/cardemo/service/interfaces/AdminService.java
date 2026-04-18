@@ -52,12 +52,18 @@ import org.springframework.data.domain.Page;
  *   <li>{@code UserUpdateService} — read + update a user (COUSR02C.cbl)</li>
  * </ul>
  *
- * <p>The nine methods declared here correspond exactly to the public methods
- * of these four classes. No single concrete class implements all nine methods;
- * each concrete implementation is responsible for its own domain-specific
- * subset. See the package-level README / folder-level AAP note for the
- * implementation strategy (each concrete class implements {@code AdminService}
- * and provides only its own methods in its declared surface).</p>
+ * <p>The nine methods declared here aggregate the public service-API surface
+ * of these four concrete classes. Internal DTO-conversion helpers that
+ * {@code UserListService} exposes for reuse within the admin domain
+ * ({@code convertToDto(UserSecurity)} and
+ * {@code convertPageToDto(Page&lt;UserSecurity&gt;)}) are intentionally
+ * excluded from this contract because they are implementation details rather
+ * than part of the public service boundary. No single concrete class
+ * implements all nine methods; each concrete implementation is responsible
+ * for its own domain-specific subset. See the package-level README /
+ * folder-level AAP note for the implementation strategy (each concrete
+ * class implements {@code AdminService} and provides only its own methods
+ * in its declared surface).</p>
  *
  * <h3>Transactional Semantics (Implementation Concern)</h3>
  * <p>Transactional behavior is a property of the implementing classes, not of

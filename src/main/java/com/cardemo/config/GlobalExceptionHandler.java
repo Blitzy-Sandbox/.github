@@ -62,51 +62,6 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Structured error response DTO for all REST API error responses.
- *
- * <p>This record provides a consistent JSON error format across all exception
- * types handled by the {@link GlobalExceptionHandler}. It includes observability
- * fields ({@code correlationId}, {@code timestamp}) and COBOL traceability
- * fields ({@code errorCode}) for comprehensive error reporting.</p>
- *
- * <p>Example JSON output:</p>
- * <pre>{@code
- * {
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Account not found with id: 00000000001",
- *   "errorCode": "RNF",
- *   "timestamp": "2026-03-17T10:15:30.123Z",
- *   "path": "/api/accounts/00000000001",
- *   "correlationId": "abc-123-def"
- * }
- * }</pre>
- *
- * @param status        the HTTP status code (e.g., 404, 409, 422, 500)
- * @param error         the HTTP status reason phrase (e.g., "Not Found")
- * @param message       the human-readable error message
- * @param errorCode     the application error code from the CardDemo exception
- *                      hierarchy (e.g., "RNF", "DUP", "LOCK", "CREDIT",
- *                      "EXPIRY", "VALID", "CARDDEMO_ERROR")
- * @param fieldErrors   optional list of per-field validation errors, each
- *                      containing "field", "rejectedValue", and "message" keys;
- *                      {@code null} when not a validation error
- * @param timestamp     the ISO-8601 UTC timestamp when the error occurred
- * @param path          the request URI that triggered the error
- * @param correlationId the correlation ID from MDC for observability tracing
- */
-record ErrorResponse(
-        int status,
-        String error,
-        String message,
-        String errorCode,
-        List<Map<String, String>> fieldErrors,
-        String timestamp,
-        String path,
-        String correlationId
-) { }
-
-/**
  * Global exception handler for the CardDemo REST API.
  *
  * <p>Maps the CardDemo exception hierarchy to appropriate HTTP status codes
@@ -660,4 +615,62 @@ public class GlobalExceptionHandler {
                 MDC.get(CORRELATION_ID_KEY)
         );
     }
+
+    /**
+     * Structured error response DTO for all REST API error responses.
+     *
+     * <p>This record provides a consistent JSON error format across all exception
+     * types handled by the enclosing {@link GlobalExceptionHandler}. It includes
+     * observability fields ({@code correlationId}, {@code timestamp}) and COBOL
+     * traceability fields ({@code errorCode}) for comprehensive error reporting.</p>
+     *
+     * <p>Visibility &amp; Placement: This record is declared as a
+     * {@code public} nested record inside {@link GlobalExceptionHandler} to
+     * preserve byte-for-byte structural parity with the source
+     * {@code WebConfig.ErrorResponse} (source {@code WebConfig.java} line 274,
+     * which declared {@code public record ErrorResponse} as a nested record
+     * of {@code WebConfig}). The fully qualified name is therefore
+     * {@code com.cardemo.config.GlobalExceptionHandler.ErrorResponse}, as
+     * explicitly required by AAP &sect;0.5.2 (Import Transformation Rules)
+     * and AAP &sect;0.7.2 (WebConfig Decomposition &mdash; "inner record").
+     * Java only permits a single {@code public} top-level type per {@code .java}
+     * file; nesting within the enclosing handler class is the correct way to
+     * make this type {@code public} while preserving AAP compliance.</p>
+     *
+     * <p>Example JSON output:</p>
+     * <pre>{@code
+     * {
+     *   "status": 404,
+     *   "error": "Not Found",
+     *   "message": "Account not found with id: 00000000001",
+     *   "errorCode": "RNF",
+     *   "timestamp": "2026-03-17T10:15:30.123Z",
+     *   "path": "/api/accounts/00000000001",
+     *   "correlationId": "abc-123-def"
+     * }
+     * }</pre>
+     *
+     * @param status        the HTTP status code (e.g., 404, 409, 422, 500)
+     * @param error         the HTTP status reason phrase (e.g., "Not Found")
+     * @param message       the human-readable error message
+     * @param errorCode     the application error code from the CardDemo exception
+     *                      hierarchy (e.g., "RNF", "DUP", "LOCK", "CREDIT",
+     *                      "EXPIRY", "VALID", "CARDDEMO_ERROR")
+     * @param fieldErrors   optional list of per-field validation errors, each
+     *                      containing "field", "rejectedValue", and "message" keys;
+     *                      {@code null} when not a validation error
+     * @param timestamp     the ISO-8601 UTC timestamp when the error occurred
+     * @param path          the request URI that triggered the error
+     * @param correlationId the correlation ID from MDC for observability tracing
+     */
+    public record ErrorResponse(
+            int status,
+            String error,
+            String message,
+            String errorCode,
+            List<Map<String, String>> fieldErrors,
+            String timestamp,
+            String path,
+            String correlationId
+    ) { }
 }

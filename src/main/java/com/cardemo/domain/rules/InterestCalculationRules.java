@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -175,6 +177,32 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class InterestCalculationRules {
+
+    // ========================================================================
+    // Logger
+    // ========================================================================
+
+    /**
+     * SLF4J logger for operational observability.
+     *
+     * <p>Present solely to preserve byte-for-byte log parity with the source
+     * {@link com.cardemo.batch.processors.InterestCalculationProcessor} &mdash;
+     * specifically, the {@code log.error(errorMsg)} call emitted from
+     * {@code lookupInterestRate()} (source line 434) prior to throwing
+     * {@link CardDemoException} when neither the specific disclosure group
+     * nor the {@code DEFAULT} fallback group contains a matching
+     * rate-lookup record. Omitting this log statement would regress
+     * operational observability for the COBOL {@code 9999-ABEND-PROGRAM}
+     * equivalent path.</p>
+     *
+     * <p>This field is intentionally declared as the only non-constant
+     * static member of this class. SLF4J is part of the standard Java
+     * logging ecosystem and carries no Spring-framework coupling, so
+     * adding this field does not compromise the class's
+     * framework-independent design per AAP &sect;0.4.3
+     * &ldquo;Domain Rules Pattern&rdquo;.</p>
+     */
+    private static final Logger log = LoggerFactory.getLogger(InterestCalculationRules.class);
 
     // ========================================================================
     // Public Constants
@@ -403,11 +431,15 @@ public final class InterestCalculationRules {
         // Fatal error: neither account group nor DEFAULT found
         // (← 9999-ABEND-PROGRAM). Error message format preserved exactly
         // from InterestCalculationProcessor source lines 430-433 to
-        // maintain log/test-assertion parity (AAP Rule R-001).
+        // maintain log/test-assertion parity (AAP Rule R-001). The
+        // log.error() emission below preserves byte-for-byte observability
+        // parity with source InterestCalculationProcessor.lookupInterestRate()
+        // line 434 (AAP Rule R-001 — no observability regression).
         String errorMsg = String.format(
                 "Disclosure group record not found for group '%s' or DEFAULT — "
                         + "typeCode: %s, catCode: %s (COBOL ABEND equivalent)",
                 acctGroupId, typeCode, catCode);
+        log.error(errorMsg);
         throw new CardDemoException(errorMsg);
     }
 
@@ -501,10 +533,10 @@ public final class InterestCalculationRules {
      *       yet (e.g., at the very start of the step before the first
      *       input record is processed, or after the final account has
      *       already been flushed).</li>
-     *   <li>{@code totalInterest} is non-{@code null} AND not equal to
-     *       zero by {@link BigDecimal#compareTo(BigDecimal)} (which
-     *       treats different-scale representations of zero such as
-     *       {@code 0} and {@code 0.00} as equal, unlike
+     *   <li>{@code totalInterest} is not equal to zero by
+     *       {@link BigDecimal#compareTo(BigDecimal)} (which treats
+     *       different-scale representations of zero such as {@code 0}
+     *       and {@code 0.00} as equal, unlike
      *       {@link Object#equals(Object)}). This matches the COBOL
      *       semantic of testing a numeric field for non-zero after
      *       accumulation.</li>
@@ -515,21 +547,25 @@ public final class InterestCalculationRules {
      * whose transaction categories all had zero balances) or when no
      * current account is set (e.g., the step has no input records).</p>
      *
-     * <p>The {@code null} check on {@code totalInterest} extends the
-     * source implementation (which would throw a
-     * {@link NullPointerException} on a null accumulator) to produce a
-     * clean {@code false} return. This is defensive &mdash; the
-     * processor always initializes {@code totalInterest} to
-     * {@link BigDecimal#ZERO} at step start, so a {@code null} value
-     * should never occur in practice. The defensive check preserves
-     * behavioral equivalence for all non-null inputs while adding
-     * safety for unexpected inputs.</p>
+     * <p>Caller contract for {@code totalInterest}: the processor
+     * always initializes {@code totalInterest} to {@link BigDecimal#ZERO}
+     * at step start (via {@code @BeforeStep}) and re-initializes it to
+     * {@link BigDecimal#ZERO} after each account-break flush, so
+     * {@code totalInterest} is guaranteed non-{@code null} when this
+     * method is invoked. Consistent with AAP Rule R-001 &mdash;
+     * &ldquo;purely structural: relocation without rewriting&rdquo;
+     * &mdash; this method preserves the source guard exactly (source:
+     * {@code InterestCalculationProcessor.updateAccount()} line 542):
+     * no defensive {@code null} branch is introduced; a {@code null}
+     * {@code totalInterest} will propagate as a
+     * {@link NullPointerException} just as it would in the source
+     * processor.</p>
      *
      * @param account       the account entity, or {@code null} if no
      *                      current account has been established
-     * @param totalInterest the accumulated total interest, or
-     *                      {@code null} if not yet initialized
-     * @return {@code true} if both inputs are non-{@code null} and
+     * @param totalInterest the accumulated total interest (must be
+     *                      non-{@code null}; see caller contract above)
+     * @return {@code true} if {@code account} is non-{@code null} and
      *         {@code totalInterest} is not zero; {@code false}
      *         otherwise. When {@code true}, the caller should invoke
      *         {@link #applyInterestToAccount(Account, BigDecimal)}
@@ -538,7 +574,6 @@ public final class InterestCalculationRules {
      */
     public boolean shouldApplyInterest(Account account, BigDecimal totalInterest) {
         return account != null
-                && totalInterest != null
                 && totalInterest.compareTo(BigDecimal.ZERO) != 0;
     }
 }
