@@ -1036,7 +1036,7 @@ graph LR
     subgraph RefactorBefore["Initial Migration — Flat Layering"]
         direction TB
         FC["@RestController<br/>8 controllers"]
-        FS["@Service<br/>19 concrete classes<br/>(business rules +<br/>validation + mapping +<br/>orchestration)<br/>+ duplicated constants"]
+        FS["@Service<br/>20 concrete classes<br/>(business rules +<br/>validation + mapping +<br/>orchestration)<br/>+ duplicated constants"]
         FR["@Repository<br/>11 JPA interfaces"]
         FC -->|"@Autowired<br/>concrete type"| FS
         FS -->|"JpaRepository"| FR
