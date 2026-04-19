@@ -7,44 +7,38 @@
  *
  *   1. Eliminates the runtime fragility of
  *      {@link com.cardemo.controller.TransactionController} by providing a
- *      single {@code TransactionService} bean. Currently, only
- *      {@link TransactionListService} is present on this branch and
- *      declares {@code implements TransactionService}; future commits will
- *      add TransactionAddService and TransactionDetailService, which will
+ *      single {@code TransactionService} bean. Multiple concrete services
+ *      in the transaction domain ({@link TransactionListService},
+ *      {@link TransactionAddService}, and — in a future commit —
+ *      TransactionDetailService) each declare
+ *      {@code implements TransactionService}, which would otherwise
  *      create the same multi-bean ambiguity already resolved for
- *      {@code AdminService} and {@code MenuService}. Delivering this
- *      composite now resolves the ambiguity proactively so that those
- *      future additions require no controller changes.
+ *      {@code AdminService} and {@code MenuService}. This composite
+ *      resolves the ambiguity by carrying the {@link Primary} annotation.
  *
- *   2. Gracefully degrades the three transaction-domain methods whose
- *      concrete implementations have not yet been delivered to this
- *      branch (TransactionAddService owns addTransaction/copyFromTransaction;
- *      TransactionDetailService owns getTransaction). Instead of allowing
- *      the controller to dispatch to a stub that throws
- *      {@code UnsupportedOperationException} and thereby map to an HTTP 500,
- *      those methods throw {@link UnsupportedOperationException} directly
- *      from this composite — the same runtime outcome as the current
- *      stub-on-TransactionListService behaviour, but with a single,
- *      explicit "not yet implemented on this branch" message. When
- *      TransactionAddService and TransactionDetailService land on this
- *      branch, this composite's constructor will be extended to accept
- *      them and the three throw statements will be replaced with
- *      delegations.
+ *   2. Gracefully degrades the one transaction-domain method whose
+ *      concrete implementation has not yet been delivered to this
+ *      branch (TransactionDetailService owns getTransaction). Instead of
+ *      allowing the controller to dispatch to a stub, {@code getTransaction}
+ *      throws {@link UnsupportedOperationException} directly from this
+ *      composite with an explicit "not yet implemented on this branch"
+ *      message. When TransactionDetailService lands on this branch, this
+ *      composite's constructor will be extended to accept it and the
+ *      throw statement will be replaced with a delegation.
  *
  * Routing below:
  *   listTransactions      -> TransactionListService
  *   hasNextPage           -> TransactionListService
  *   getPageNavigation     -> TransactionListService
- *   addTransaction        -> UnsupportedOperationException (not on branch)
- *   copyFromTransaction   -> UnsupportedOperationException (not on branch)
+ *   addTransaction        -> TransactionAddService
+ *   copyFromTransaction   -> TransactionAddService
  *   getTransaction        -> UnsupportedOperationException (not on branch)
  *
  * AAP Rule Compliance:
  *   R-001 — No business logic is introduced; delegation only.
  *   R-004 — COBOL traceability (COTRN00C.cbl, COTRN01C.cbl, COTRN02C.cbl)
  *           is preserved via Javadoc {@code @see} references to the
- *           concrete service whose eventual arrival will replace each
- *           not-implemented stub.
+ *           concrete service that owns each method.
  *   R-006 — Method signatures match the TransactionService interface
  *           exactly, including the TYPED {@code Page<TransactionDto>}
  *           generic on {@link #hasNextPage(Page)} and
@@ -69,28 +63,32 @@ import org.springframework.stereotype.Service;
 
 /**
  * Composite {@link TransactionService} implementation that delegates the
- * three list-domain methods to {@link TransactionListService} and throws
- * {@link UnsupportedOperationException} from the three add/detail methods
- * whose concrete owners are not present on this branch.
+ * three list-domain methods to {@link TransactionListService}, the
+ * add and copy methods to {@link TransactionAddService}, and throws
+ * {@link UnsupportedOperationException} from {@code getTransaction} whose
+ * concrete owner (TransactionDetailService) is not present on this
+ * branch.
  *
  * <p>The composite carries the {@link Primary} annotation so that Spring
- * selects it for {@code TransactionService} injection points even after
- * future commits add TransactionAddService and TransactionDetailService
- * (each of which will also declare {@code implements TransactionService}).
- * When those classes land, this composite must be extended to accept them
- * as constructor parameters and the three throw statements must be
- * replaced with delegations to the new services.</p>
+ * selects it for {@code TransactionService} injection points even though
+ * multiple concrete classes also declare
+ * {@code implements TransactionService}. When TransactionDetailService
+ * arrives, this composite must be extended to accept it as an additional
+ * constructor parameter and the remaining throw statement must be
+ * replaced with a delegation.</p>
  *
- * <p>This class contains no business logic. Three methods are one-line
- * delegations to {@link TransactionListService}. The other three throw
- * {@link UnsupportedOperationException} with a message that explicitly
- * names the concrete service that will eventually own the method, so
- * that an operator reading the stack trace understands both the cause
- * (the service is not yet on this branch) and the resolution (deliver
- * the named service and extend this composite).</p>
+ * <p>This class contains no business logic. Five methods are one-line
+ * delegations to the concrete services. The remaining method
+ * ({@code getTransaction}) throws {@link UnsupportedOperationException}
+ * with a message that explicitly names the concrete service that will
+ * eventually own it, so that an operator reading the stack trace
+ * understands both the cause (the service is not yet on this branch)
+ * and the resolution (deliver the named service and extend this
+ * composite).</p>
  *
  * @see TransactionService
  * @see TransactionListService
+ * @see TransactionAddService
  */
 @Service
 @Primary
@@ -99,74 +97,64 @@ public class TransactionServiceImpl implements TransactionService {
     /**
      * Concrete implementation of {@code listTransactions},
      * {@code hasNextPage}, and {@code getPageNavigation}
-     * (COTRN00C.cbl, CT00). The only transaction-domain concrete service
-     * currently on this branch.
+     * (COTRN00C.cbl, CT00).
      */
     private final TransactionListService transactionListService;
 
     /**
-     * Constructs the composite transaction service with the only concrete
-     * delegate currently present on the branch.
+     * Concrete implementation of {@code addTransaction} and
+     * {@code copyFromTransaction} (COTRN02C.cbl, CT02 — add).
+     */
+    private final TransactionAddService transactionAddService;
+
+    /**
+     * Constructs the composite transaction service with the concrete
+     * delegates currently present on the branch.
      *
-     * <p>When {@code TransactionAddService} (COTRN02C.cbl) and
-     * {@code TransactionDetailService} (COTRN01C.cbl) are added to the
-     * branch, extend this constructor to accept them as additional
-     * parameters and replace the throw statements in
-     * {@link #addTransaction(TransactionDto)},
-     * {@link #copyFromTransaction(String)}, and
-     * {@link #getTransaction(String)} with delegations to the new
-     * services.</p>
+     * <p>When {@code TransactionDetailService} (COTRN01C.cbl) is added
+     * to the branch, extend this constructor to accept it as an
+     * additional parameter and replace the throw statement in
+     * {@link #getTransaction(String)} with a delegation to the new
+     * service.</p>
      *
      * @param transactionListService delegate for the three list-domain
-     *                               methods
+     *                               methods (COTRN00C.cbl)
+     * @param transactionAddService  delegate for the add and copy
+     *                               methods (COTRN02C.cbl)
      */
     public TransactionServiceImpl(
-            TransactionListService transactionListService) {
+            TransactionListService transactionListService,
+            TransactionAddService transactionAddService) {
         this.transactionListService = transactionListService;
+        this.transactionAddService = transactionAddService;
     }
 
     /**
      * {@inheritDoc}
      *
-     * <p>Not implemented on this branch. When
-     * {@code TransactionAddService} (COTRN02C.cbl, CT02 — add) is
-     * added, replace this stub with a delegation to its
-     * {@code addTransaction} method.</p>
+     * <p>Delegates to
+     * {@link TransactionAddService#addTransaction(TransactionDto)} —
+     * create-new transaction flow (COTRN02C.cbl, CT02 — add).</p>
      *
-     * @throws UnsupportedOperationException always, because
-     *         {@code TransactionAddService} is not yet present on this
-     *         branch.
+     * @see TransactionAddService#addTransaction(TransactionDto)
      */
     @Override
     public TransactionDto addTransaction(TransactionDto request) {
-        throw new UnsupportedOperationException(
-                "addTransaction is owned by TransactionAddService "
-                        + "(COTRN02C.cbl, CT02), which is not yet present "
-                        + "on this branch. Deliver TransactionAddService "
-                        + "and extend TransactionServiceImpl to delegate "
-                        + "to it.");
+        return transactionAddService.addTransaction(request);
     }
 
     /**
      * {@inheritDoc}
      *
-     * <p>Not implemented on this branch. When
-     * {@code TransactionAddService} (COTRN02C.cbl, CT02 — add) is
-     * added, replace this stub with a delegation to its
-     * {@code copyFromTransaction} method.</p>
+     * <p>Delegates to
+     * {@link TransactionAddService#copyFromTransaction(String)} —
+     * copy-and-create transaction flow (COTRN02C.cbl, CT02 — add).</p>
      *
-     * @throws UnsupportedOperationException always, because
-     *         {@code TransactionAddService} is not yet present on this
-     *         branch.
+     * @see TransactionAddService#copyFromTransaction(String)
      */
     @Override
     public TransactionDto copyFromTransaction(String sourceTransactionId) {
-        throw new UnsupportedOperationException(
-                "copyFromTransaction is owned by TransactionAddService "
-                        + "(COTRN02C.cbl, CT02), which is not yet present "
-                        + "on this branch. Deliver TransactionAddService "
-                        + "and extend TransactionServiceImpl to delegate "
-                        + "to it.");
+        return transactionAddService.copyFromTransaction(sourceTransactionId);
     }
 
     /**
