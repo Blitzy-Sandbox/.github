@@ -151,18 +151,32 @@ public class CardController {
      * 7 rows per page (WS-MAX-SCREEN-LINES) with optional Account Number and
      * Card Number filter fields.</p>
      *
-     * <p>Filtering behavior:</p>
+     * <p>Filtering behavior (exclusive filter precedence):</p>
      * <ul>
      *   <li>If {@code acctId} is provided (non-null, non-blank): delegates to
      *       {@link CardService#listCardsByAccount(String, int)} which resolves
-     *       cards via the CXACAIX alternate index (paragraph 9500-FILTER-RECORDS).</li>
-     *   <li>Otherwise: delegates to {@link CardService#listCards(int, String, String)}
-     *       which supports combined acctId + cardNum filtering with AND logic.</li>
+     *       cards via the CXACAIX alternate index (paragraph 9500-FILTER-RECORDS).
+     *       <strong>Note:</strong> {@code cardNum} is <em>silently ignored</em> in
+     *       this branch because the CXACAIX path does not accept a card-number
+     *       filter. This matches the COBOL BMS screen's exclusive-filter semantics
+     *       (when both filters are supplied, the account filter takes precedence).</li>
+     *   <li>Otherwise (acctId is null or blank): delegates to
+     *       {@link CardService#listCards(int, String, String)} which supports both
+     *       filters independently. Providing only {@code cardNum} will filter by
+     *       card number alone.</li>
      * </ul>
+     *
+     * <p>To filter by both account and card number simultaneously, clients must
+     * be aware that {@code cardNum} will be silently dropped when {@code acctId}
+     * is present. This preserves byte-identical behavior with the original
+     * COCRDLIC.cbl program, where the account filter takes precedence over the
+     * card-number filter on the BMS screen.</p>
      *
      * @param page    zero-based page number (defaults to 0); maps COBOL PF7/PF8 page navigation
      * @param acctId  optional account ID filter (11-digit); maps BMS field ACCTSIDI
-     * @param cardNum optional card number filter (16-digit); maps BMS field CRDSIDI
+     * @param cardNum optional card number filter (16-digit); maps BMS field CRDSIDI.
+     *                <strong>Ignored when {@code acctId} is provided</strong>
+     *                (see Filtering behavior above).
      * @return HTTP 200 with {@link Page} of {@link CardDto} containing up to 7 cards per page,
      *         total element count, total pages, and navigation metadata
      */
@@ -176,8 +190,16 @@ public class CardController {
 
         Page<CardDto> result;
         if (acctId != null && !acctId.isBlank()) {
+            // Account filter takes precedence — delegate to CXACAIX alternate-index
+            // lookup. Note: cardNum is silently ignored here because the
+            // listCardsByAccount() contract does not support card-number filtering
+            // (matches COBOL BMS screen's exclusive-filter semantics where the
+            // account filter takes precedence over the card-number filter).
+            // See method Javadoc above for detailed filtering behavior.
             result = cardService.listCardsByAccount(acctId, page);
         } else {
+            // No account filter — use general listCards() which supports the
+            // optional cardNum filter independently.
             result = cardService.listCards(page, acctId, cardNum);
         }
 

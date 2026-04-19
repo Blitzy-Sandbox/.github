@@ -86,7 +86,7 @@ import com.cardemo.service.interfaces.ReportService;
  *   <li>Controller validates confirmation and delegates to service</li>
  *   <li>Service publishes JSON message to SQS FIFO queue</li>
  *   <li>Spring Batch listener receives message and executes report job</li>
- *   <li>Controller returns HTTP 202 with SQS message ID as confirmation</li>
+ *   <li>Controller returns HTTP 202 with a human-readable confirmation message as confirmation</li>
  * </ol>
  *
  * <p>Source traceability: CORPT00C.cbl — CardDemo v1.0-15-g27d6c6f-68</p>
@@ -157,7 +157,10 @@ public class ReportController {
      * <ul>
      *   <li><strong>200 OK</strong> — Submission cancelled (confirm is "N", null, or blank)</li>
      *   <li><strong>202 Accepted</strong> — Report criteria queued for async batch processing.
-     *       The response body contains the SQS message ID as a confirmation reference.
+     *       The response body contains a human-readable confirmation message describing the
+     *       submitted report (e.g., "Monthly report submitted for printing ..."). This
+     *       mirrors the COBOL CORPT00C.cbl confirmation screen output, not the underlying
+     *       SQS {@code MessageId} (which is internal to the service layer).
      *       HTTP 202 (not 200 or 201) is architecturally significant because the report
      *       is not generated synchronously — it is queued for batch processing, preserving
      *       the COBOL online-to-batch bridge semantics.</li>
@@ -177,7 +180,9 @@ public class ReportController {
      * @return {@code ResponseEntity<String>} with either:
      *         <ul>
      *           <li>HTTP 200 with cancellation message if submission is cancelled</li>
-     *           <li>HTTP 202 with SQS message ID if submission is accepted for processing</li>
+     *           <li>HTTP 202 with a human-readable confirmation message
+     *               (e.g., "Monthly report submitted for printing ...") if the
+     *               submission is accepted for async batch processing</li>
      *         </ul>
      */
     @PostMapping("/submit")
@@ -206,15 +211,22 @@ public class ReportController {
         // All business logic (date validation, report type mutual exclusivity,
         // SQS message construction) is in the service layer — controller contains
         // no business logic per architectural conventions.
-        String messageId = reportService.submitReport(request);
+        //
+        // The service returns a human-readable confirmation message (e.g.,
+        // "Monthly report submitted for printing ...") derived from the report
+        // type and submission metadata — NOT the underlying SQS MessageId, which
+        // remains encapsulated inside the service. This preserves the COBOL
+        // CORPT00C.cbl confirmation-screen semantics for the REST client.
+        String confirmationMessage = reportService.submitReport(request);
 
-        logger.info("Report submitted successfully: messageId={} monthly={} yearly={} custom={}",
-                messageId, request.isMonthly(), request.isYearly(), request.isCustom());
+        logger.info("Report submitted successfully: confirmation={} monthly={} yearly={} custom={}",
+                confirmationMessage, request.isMonthly(), request.isYearly(), request.isCustom());
 
         // Return HTTP 202 Accepted — the report is not generated synchronously.
         // It is queued for batch processing via SQS, preserving the COBOL
         // online-to-batch bridge pattern (CORPT00C → CICS TDQ → JES batch).
-        // The SQS message ID serves as a confirmation reference for the client.
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(messageId);
+        // The confirmation message serves as a user-facing reference for the client;
+        // the SQS MessageId itself is internal to the service layer.
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(confirmationMessage);
     }
 }

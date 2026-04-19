@@ -1,5 +1,6 @@
 package com.cardemo.service.card;
 
+import com.cardemo.domain.constants.CardConstants;
 import com.cardemo.domain.validation.CardValidator;
 import com.cardemo.exception.ConcurrentModificationException;
 import com.cardemo.exception.RecordNotFoundException;
@@ -316,25 +317,29 @@ public class CardUpdateService implements CardService {
     }
 
     /**
-     * Masks a card number for safe logging — shows only last 4 digits.
+     * Masks a card number for safe logging — shows only the last
+     * {@link CardConstants#MASK_VISIBLE_DIGITS} digits.
      * Prevents PII exposure in log files per security requirements.
      */
     private String maskCardNumber(String cardNum) {
-        if (cardNum == null || cardNum.length() <= 4) {
-            return "****";
+        if (cardNum == null || cardNum.length() <= CardConstants.MASK_VISIBLE_DIGITS) {
+            return "*".repeat(CardConstants.MASK_VISIBLE_DIGITS);
         }
-        return "****" + cardNum.substring(cardNum.length() - 4);
+        return "*".repeat(CardConstants.MASK_VISIBLE_DIGITS)
+                + cardNum.substring(cardNum.length() - CardConstants.MASK_VISIBLE_DIGITS);
     }
 
     /**
-     * Masks an account ID for safe logging — shows only last 4 digits.
+     * Masks an account ID for safe logging — shows only the last
+     * {@link CardConstants#MASK_VISIBLE_DIGITS} digits.
      * Prevents PII exposure in log files per security requirements.
      */
     private String maskAccountId(String acctId) {
-        if (acctId == null || acctId.length() <= 4) {
-            return "****";
+        if (acctId == null || acctId.length() <= CardConstants.MASK_VISIBLE_DIGITS) {
+            return "*".repeat(CardConstants.MASK_VISIBLE_DIGITS);
         }
-        return "****" + acctId.substring(acctId.length() - 4);
+        return "*".repeat(CardConstants.MASK_VISIBLE_DIGITS)
+                + acctId.substring(acctId.length() - CardConstants.MASK_VISIBLE_DIGITS);
     }
 
     // -----------------------------------------------------------------------

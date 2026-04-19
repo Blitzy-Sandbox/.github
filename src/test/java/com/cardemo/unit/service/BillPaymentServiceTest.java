@@ -7,7 +7,7 @@
  * Tests cover:
  *   - Input validation (null/blank account ID)
  *   - Account lookup (not found → RecordNotFoundException)
- *   - Balance validation (zero/negative → IllegalStateException)
+ *   - Balance validation (zero/negative → ValidationException)
  *   - Cross-reference lookup (not found → RecordNotFoundException)
  *   - Auto-ID generation (MAX + 1, 16-char zero-padded)
  *   - Hardcoded COBOL transaction values (type '02', cat 2, source 'POS TERM',
@@ -73,7 +73,7 @@ import static org.mockito.Mockito.when;
  * <ul>
  *   <li>Input Validation (tests 1-2): null/blank account ID → IllegalArgumentException</li>
  *   <li>Account Lookup (test 3): account not found → RecordNotFoundException</li>
- *   <li>Balance Validation (tests 4-5): zero/negative balance → IllegalStateException</li>
+ *   <li>Balance Validation (tests 4-5): zero/negative balance → ValidationException</li>
  *   <li>Cross-Reference Lookup (test 6): xref not found → RecordNotFoundException</li>
  *   <li>Auto-ID Generation (test 7): MAX + 1, 16-char zero-padded format</li>
  *   <li>Transaction Fields (tests 8-12): hardcoded COBOL values verified exactly</li>
@@ -264,7 +264,7 @@ class BillPaymentServiceTest {
     // =======================================================================
 
     /**
-     * Test 4: Zero balance throws IllegalStateException.
+     * Test 4: Zero balance throws ValidationException.
      *
      * <p>Maps COBOL: {@code IF ACCT-CURR-BAL <= ZEROS} (COBIL00C.cbl line 197).
      * When the account current balance is exactly zero, the COBOL program
@@ -281,7 +281,7 @@ class BillPaymentServiceTest {
     }
 
     /**
-     * Test 5: Negative balance throws IllegalStateException.
+     * Test 5: Negative balance throws ValidationException.
      *
      * <p>Maps COBOL: {@code IF ACCT-CURR-BAL <= ZEROS} (COBIL00C.cbl line 197).
      * When the account current balance is negative, the same rejection applies.

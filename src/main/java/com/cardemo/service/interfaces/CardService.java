@@ -277,6 +277,16 @@ public interface CardService {
      * <p>Page size is fixed at 7 rows per page, matching the COBOL
      * constant {@code WS-MAX-SCREEN-LINES}.</p>
      *
+     * <p><strong>Filter scope:</strong> This method does <em>not</em> accept
+     * a card-number filter. Callers that need to filter by both account and
+     * card number simultaneously must use
+     * {@link #listCards(int, String, String)} instead. When the REST
+     * controller receives both {@code acctId} and {@code cardNum} query
+     * parameters, it routes to this method and silently drops the
+     * {@code cardNum} filter. This preserves the COBOL BMS screen's
+     * exclusive-filter semantics from COCRDLIC.cbl, where the account
+     * filter takes precedence over the card-number filter.</p>
+     *
      * <p>Implementation:
      * {@code CardListService#listCardsByAccount(String, int)} runs under
      * class-level {@code @Transactional(readOnly = true)}.</p>
@@ -295,6 +305,7 @@ public interface CardService {
      *         STATUS 23 / {@code DFHRESP(NOTFND)})
      * @see <a href="file:app/cbl/COCRDLIC.cbl">COCRDLIC.cbl</a>
      *      — account-scoped browse via {@code CXACAIX} alternate index
+     * @see #listCards(int, String, String) for combined acctId + cardNum filtering
      */
     Page<CardDto> listCardsByAccount(String acctId, int page);
 
