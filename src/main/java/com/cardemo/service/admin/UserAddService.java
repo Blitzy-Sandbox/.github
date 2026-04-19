@@ -42,7 +42,6 @@ import com.cardemo.exception.DuplicateRecordException;
 import com.cardemo.exception.ValidationException;
 import com.cardemo.model.dto.UserSecurityDto;
 import com.cardemo.model.entity.UserSecurity;
-import com.cardemo.model.enums.UserType;
 import com.cardemo.repository.UserSecurityRepository;
 import com.cardemo.service.interfaces.AdminService;
 
