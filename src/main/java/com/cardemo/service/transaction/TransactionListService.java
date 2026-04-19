@@ -12,6 +12,7 @@
 package com.cardemo.service.transaction;
 
 import com.cardemo.domain.constants.PaginationConstants;
+import com.cardemo.domain.constants.TransactionConstants;
 import com.cardemo.model.dto.TransactionDto;
 import com.cardemo.model.entity.Transaction;
 import com.cardemo.repository.TransactionRepository;
@@ -351,7 +352,7 @@ public class TransactionListService implements TransactionService {
         // TRAN-CAT-CD is PIC 9(04) in COBOL → Short in entity → String in DTO.
         // Format with leading zeros to preserve the 4-digit COBOL representation.
         dto.setTranCatCd(entity.getTranCatCd() != null
-                ? String.format("%04d", entity.getTranCatCd())
+                ? String.format(TransactionConstants.CATEGORY_CODE_FORMAT, entity.getTranCatCd())
                 : null);
 
         // Source and description

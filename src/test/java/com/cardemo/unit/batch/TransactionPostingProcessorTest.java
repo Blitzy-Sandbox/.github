@@ -491,7 +491,7 @@ class TransactionPostingProcessorTest {
      * zero-amount transactions without error and that the account is saved.
      */
     @Test
-    void process_shouldTreatZeroAmountAsCycDebitPath() throws Exception {
+    void process_shouldTreatZeroAmountAsCycCreditPath() throws Exception {
         DailyTransaction dt = createDailyTransaction(CARD_NUM, BigDecimal.ZERO);
 
         when(cardCrossReferenceRepository.findById(CARD_NUM))

@@ -26,6 +26,7 @@
  */
 package com.cardemo.service.transaction;
 
+import com.cardemo.domain.constants.TransactionConstants;
 import com.cardemo.exception.RecordNotFoundException;
 import com.cardemo.model.dto.TransactionDto;
 import com.cardemo.model.entity.Transaction;
@@ -81,7 +82,8 @@ import org.springframework.transaction.annotation.Transactional;
  *       substitution per AAP §0.8.2.</li>
  *   <li>Category code conversion — Entity stores {@code tranCatCd} as {@code Short}
  *       (matching DDL SMALLINT); DTO uses {@code String} (matching COBOL PIC 9(04)).
- *       Conversion preserves leading zeros via {@code String.format("%04d", ...)}.</li>
+ *       Conversion preserves leading zeros via
+ *       {@code String.format(TransactionConstants.CATEGORY_CODE_FORMAT, ...)}.</li>
  * </ul>
  *
  * <h3>Layered Architecture Note</h3>
@@ -232,7 +234,7 @@ public class TransactionDetailService implements TransactionService {
         // Entity stores as Short (DDL SMALLINT); DTO uses String (COBOL PIC 9(04)).
         // Conversion preserves leading zeros to match COBOL 4-digit display format.
         dto.setTranCatCd(entity.getTranCatCd() != null
-                ? String.format("%04d", entity.getTranCatCd())
+                ? String.format(TransactionConstants.CATEGORY_CODE_FORMAT, entity.getTranCatCd())
                 : null);
 
         // Field 4: TRAN-SOURCE PIC X(10) — Transaction source identifier

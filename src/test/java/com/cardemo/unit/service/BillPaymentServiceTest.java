@@ -272,7 +272,7 @@ class BillPaymentServiceTest {
      * Uses BigDecimal.ZERO — no float/double per AAP §0.8.2.</p>
      */
     @Test
-    void testProcessPayment_zeroBalance_throwsIllegalState() {
+    void testProcessPayment_zeroBalance_throwsValidationException() {
         account.setAcctCurrBal(BigDecimal.ZERO);
         when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
@@ -288,7 +288,7 @@ class BillPaymentServiceTest {
      * Uses BigDecimal("-100.00") — no float/double per AAP §0.8.2.</p>
      */
     @Test
-    void testProcessPayment_negativeBalance_throwsIllegalState() {
+    void testProcessPayment_negativeBalance_throwsValidationException() {
         account.setAcctCurrBal(new BigDecimal("-100.00"));
         when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 

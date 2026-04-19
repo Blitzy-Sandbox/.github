@@ -471,7 +471,7 @@ Stage 4b: TransactionReportJob (TRANREPT)     ─┘ (parallel)
 - `src/main/java/com/cardemo/service/interfaces/MenuService.java` — NEW — service contract for menu operations
 - `src/main/java/com/cardemo/service/interfaces/ReportService.java` — NEW — service contract for report submission
 - `src/main/java/com/cardemo/service/interfaces/TransactionService.java` — NEW — service contract for transaction operations
-- `src/main/java/com/cardemo/config/GlobalExceptionHandler.java` — NEW — extracted from `WebConfig.java` (15 `@ExceptionHandler` methods)
+- `src/main/java/com/cardemo/config/GlobalExceptionHandler.java` — NEW — extracted from `WebConfig.java` (17 `@ExceptionHandler` methods). The 15 handlers originally nested in `WebConfig` were relocated verbatim; 2 additional handlers (`MethodArgumentTypeMismatchException` and `InvalidDataAccessApiUsageException`) were added as defensive hardening to map controller path-variable coercion failures and Spring-Data illegal-argument wrapping to consistent {@code ErrorResponse} payloads (HTTP 400). These additions do not alter any pre-existing endpoint contract and preserve the Javadoc-documented error-mapping semantics for every in-scope exception type.
 - `src/main/java/com/cardemo/config/JacksonConfig.java` — NEW — extracted `Jackson2ObjectMapperBuilderCustomizer` from `WebConfig.java`
 - `src/main/java/com/cardemo/config/WebConfig.java` — REDUCED — retains only CORS mappings and request logging filter
 - `src/main/java/com/cardemo/service/**/*.java` — 20 service classes — implement `service/interfaces/*` contracts, delegate validation/rules to `domain/*`, use centralized constants

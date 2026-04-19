@@ -130,6 +130,24 @@ public final class TransactionConstants {
     public static final int MAX_AMOUNT_SCALE = 2;
 
     /**
+     * Format string used to render transaction category codes as 4-digit
+     * zero-padded decimal strings.
+     *
+     * <p>Used with {@link String#format(String, Object...)} to convert the
+     * {@code Short}-typed {@code tranCatCd} entity field (matching DDL
+     * {@code SMALLINT}) into the {@code String}-typed DTO representation that
+     * preserves the COBOL {@code TRAN-CAT-CD PIC 9(04)} 4-digit display format
+     * (e.g., {@code 5} &rarr; {@code "0005"}). Originates from the
+     * {@code TRAN-CAT-CD} field in COBOL copybook {@code CVTRA05Y.cpy}.</p>
+     *
+     * <p>Centralizes the {@code "%04d"} literal previously duplicated between
+     * {@link com.cardemo.service.transaction.TransactionDetailService} and
+     * {@link com.cardemo.service.transaction.TransactionListService} as part of
+     * the AAP &sect;0.7.4 constant-consolidation refactoring.</p>
+     */
+    public static final String CATEGORY_CODE_FORMAT = "%04d";
+
+    /**
      * Private constructor prevents instantiation of this constant holder class.
      *
      * @throws AssertionError always, to defend against reflection-based
