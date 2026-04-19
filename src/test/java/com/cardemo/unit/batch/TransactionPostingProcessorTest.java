@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -67,6 +68,22 @@ class TransactionPostingProcessorTest {
     @Mock
     private MetricsConfig metricsConfig;
 
+    // ── Domain Rules (real @Spy instance — delegates to COBOL-parity cascade) ─
+    //
+    // @Spy wraps a real TransactionPostingRules(CreditLimitRules) instance so
+    // every method call (validateCascade, validateCrossReference, validateAccount,
+    // validateCreditLimit, validateExpiry, isCreditCycleAmount) executes the
+    // ACTUAL implementation extracted from TransactionPostingProcessor per AAP
+    // §0.4.3 (Domain Rules Pattern). Using @Spy (rather than @Mock) guarantees
+    // byte-identical behavior to the pre-refactor processor — all 19 tests'
+    // assertions continue to hold via data-driven validation outcomes (balances,
+    // expiry dates, BigDecimal precision) without any per-test stubs. Also
+    // satisfies Mockito strict-stubbing mode (no UnnecessaryStubbingException).
+    // See AAP §0.7.5 (Batch Pipeline State Dependency Graph — safe-to-extract:
+    // pure, stateless validation logic) and AAP R-003 (all tests pass unchanged).
+    @Spy
+    private TransactionPostingRules postingRules = new TransactionPostingRules(new CreditLimitRules());
+
     // ── Class Under Test ─────────────────────────────────────────────────────
 
     private TransactionPostingProcessor processor;
@@ -91,18 +108,6 @@ class TransactionPostingProcessorTest {
 
     @BeforeEach
     void setUp() {
-        // Use REAL domain rules instances (Option B) rather than mocking.
-        // TransactionPostingRules is a stateless @Component with a single
-        // dependency on CreditLimitRules (also stateless, no-arg constructor).
-        // Instantiating them directly preserves the exact 4-stage cascade
-        // behavior originally inlined in the processor — the tests continue
-        // to verify validation outcomes via data (balances, expiry dates,
-        // BigDecimal precision) rather than via mock stubs. See AAP §0.4.3
-        // (Domain Rules Pattern) and §0.7.5 (Batch Pipeline State Dependency
-        // Graph — safe extraction: pure, stateless validation logic).
-        CreditLimitRules creditLimitRules = new CreditLimitRules();
-        TransactionPostingRules postingRules = new TransactionPostingRules(creditLimitRules);
-
         processor = new TransactionPostingProcessor(
                 cardCrossReferenceRepository,
                 accountRepository,
