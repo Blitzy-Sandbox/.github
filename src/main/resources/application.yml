@@ -325,8 +325,22 @@ carddemo:
       # Maximum number of retries (total attempts = maxRetries + 1).
       max-retries: ${AWS_MAX_RETRIES:3}
   # Batch pipeline configuration
+  # Chunk size controls the number of records processed per Spring Batch commit boundary.
+  # Each pipeline stage has its own chunk size tuned to the per-item processing cost:
+  #   posting   — low (100): single-record validation + DB write
+  #   interest  — lower (50): multi-dataset lookups (XREFFILE, ACCTFILE, DISCGRP) per record
+  #   combine   — high (500): pure sort/merge utility step, throughput-optimized
+  #   statement — lowest (10): compute-intensive per statement (multi-dataset reads + dual-format output)
+  #   report    — medium (100): date-filtered enrichment with cross-reference data
   batch:
-    # Chunk size for Spring Batch ItemReader/ItemWriter processing
-    chunk-size: ${BATCH_CHUNK_SIZE:100}
-    # Maximum number of records to skip before failing a batch step
-    skip-limit: ${BATCH_SKIP_LIMIT:10}
+    chunk-size:
+      # Daily transaction posting (POSTTRAN → CBTRN02C). JCL origin: POSTTRAN.jcl.
+      posting: ${BATCH_POSTING_CHUNK:100}
+      # Interest calculation (INTCALC → CBACT04C). JCL origin: INTCALC.jcl.
+      interest: ${BATCH_INTEREST_CHUNK:50}
+      # Combine transactions (COMBTRAN → DFSORT + REPRO). JCL origin: COMBTRAN.jcl.
+      combine: ${BATCH_COMBINE_CHUNK:500}
+      # Statement generation (CREASTMT → CBSTM03A/CBSTM03B). JCL origin: CREASTMT.JCL.
+      statement: ${BATCH_STATEMENT_CHUNK:10}
+      # Transaction report (TRANREPT → CBTRN03C). JCL origin: TRANREPT.jcl.
+      report: ${BATCH_REPORT_CHUNK:100}

@@ -53,10 +53,11 @@ Each decision is recorded as a row in a Markdown table with the following column
 | D-013 | LocalStack for AWS service emulation | MinIO (S3 only), ElasticMQ (SQS only), AWS SDK mock libraries | CardDemo uses S3, SQS, and SNS — three distinct AWS services. LocalStack provides a single container emulating all three with API-compatible endpoints. MinIO covers only S3. ElasticMQ covers only SQS. Using separate emulators increases Docker Compose complexity. AWS SDK mocks cannot verify serialization or HTTP-level behavior. | LocalStack Pro requires an auth token for advanced features; mitigated by using only free-tier services (S3, SQS, SNS are available in community edition). LocalStack API compatibility may lag behind real AWS; mitigated by keeping AWS SDK versions aligned with LocalStack's tested matrix. |
 | D-014 | Maven for build system | Gradle (Groovy DSL), Gradle (Kotlin DSL), Bazel | Spring Boot's official documentation and Spring Initializr default to Maven. The CardDemo project has straightforward build requirements (compile, test, package) without custom build logic that would benefit from Gradle's flexibility. Maven's declarative POM is easier to audit for dependency versions (critical for OWASP Gate 6 compliance). Bazel is over-engineered for a single-module application. | Maven build times are slower than Gradle for incremental builds; mitigated by Maven daemon (`mvnd`) for local development and Maven build caching in CI. XML verbosity in `pom.xml`; mitigated by consistent formatting and section comments. |
 | D-015 | Java 25 LTS as target runtime | Java 21 LTS, Java 23 (non-LTS), Java 24 (non-LTS) | Java 25 is the latest LTS release (September 2025) with 8+ years of Oracle support. It includes flexible constructor bodies, compact source files, module import declarations, and performance improvements (compact object headers). Java 21 LTS is supported but misses 2 years of language improvements. Non-LTS versions (22, 23, 24) receive only 6 months of updates, unsuitable for enterprise production. | Ecosystem compatibility: some third-party libraries may not yet declare Java 25 support; mitigated by using Spring Boot 3.5.x BOM which validates all managed dependencies against Java 25. Tooling support (IDEs, CI plugins) may lag for newest LTS; mitigated by using SDKMAN for version management and Maven toolchains plugin. Future enhancement: virtual threads (`spring.threads.virtual.enabled=true`) can be enabled in `application.yml` once the team validates all blocking I/O compatibility. |
-| D-016 | Spring Boot 3.5.x as application framework | Spring Boot 3.4.x, Quarkus 3.x, Micronaut 4.x | Spring Boot 3.5.x is the latest stable release (3.5.11 used) with built-in structured logging, virtual thread support, and comprehensive observability via Micrometer. It provides the richest ecosystem for the migration: Spring Data JPA (VSAM replacement), Spring Batch (JCL replacement), Spring Security (authentication), and Spring Cloud AWS (S3/SQS/SNS). Quarkus and Micronaut have smaller ecosystems for batch processing and AWS integration. Spring Boot 3.4.x lacks structured logging improvements. | Spring Boot framework upgrades may introduce breaking changes; mitigated by pinning to a specific patch version (3.5.11) via the parent POM and using the BOM for all dependency version management. Large framework footprint; mitigated by excluding unused auto-configurations. |
+| D-016 | Spring Boot 3.5.x as application framework | Spring Boot 3.4.x, Quarkus 3.x, Micronaut 4.x | Spring Boot 3.5.x is the latest stable release (3.5.12 currently pinned; see D-020 for security-driven upgrade from 3.5.11) with built-in structured logging, virtual thread support, and comprehensive observability via Micrometer. It provides the richest ecosystem for the migration: Spring Data JPA (VSAM replacement), Spring Batch (JCL replacement), Spring Security (authentication), and Spring Cloud AWS (S3/SQS/SNS). Quarkus and Micronaut have smaller ecosystems for batch processing and AWS integration. Spring Boot 3.4.x lacks structured logging improvements. | Spring Boot framework upgrades may introduce breaking changes; mitigated by pinning to a specific patch version (currently 3.5.12) via the parent POM and using the BOM for all dependency version management, with version advancement gated by a formal D-020 security exception process. Large framework footprint; mitigated by excluding unused auto-configurations. |
 | D-017 | Structured JSON logging with correlation IDs | Plain text log format, Log4j2, custom logging framework | The source COBOL application has zero logging infrastructure. Structured JSON logging (via `logstash-logback-encoder`) enables machine-parseable log aggregation from day one. Correlation IDs (injected via MDC `Filter`) enable request tracing across service and batch layers. Plain text logs are human-readable but unsearchable at scale. Log4j2 has had critical CVEs (Log4Shell); Logback with SLF4J is Spring Boot's default. | JSON log verbosity increases storage requirements; mitigated by configurable log levels per package and structured field selection. Correlation ID propagation requires `Filter` registration and MDC cleanup; mitigated by implementing `CorrelationIdFilter` as a Spring `@Component` with `@Order(Ordered.HIGHEST_PRECEDENCE)`. |
 | D-018 | Micrometer with OpenTelemetry bridge for distributed tracing | Zipkin direct integration, Datadog agent, AWS X-Ray SDK | Micrometer Tracing provides a vendor-neutral API that Spring Boot instruments automatically (controllers, JPA, HTTP clients). The OpenTelemetry bridge (`micrometer-tracing-bridge-otel`) exports traces in OTLP format, compatible with Jaeger (local), Datadog, AWS X-Ray, and any OTLP-compatible backend. Zipkin direct integration limits backend portability. Datadog agent requires proprietary infrastructure. AWS X-Ray SDK couples the application to a single cloud provider. | OpenTelemetry SDK adds transitive dependencies increasing JAR size; mitigated by the Spring Boot BOM managing compatible versions. Trace sampling configuration is required for production to control costs; mitigated by configurable sampling rates in `application.yml`. |
 | D-019 | Layered Domain-Driven Refactoring — introduce `domain/` layer, extract service interfaces, centralize constants, decompose `WebConfig.java` | Leave procedural/COBOL-translated structure unchanged; full DDD tactical patterns (aggregates, value objects, domain events); microservice decomposition; rewrite business logic in idiomatic Java | The translated codebase exhibited procedural COBOL-style patterns in monolithic service classes (AccountUpdateService 980L, TransactionAddService 763L, WebConfig 840L), 2,484 COBOL-origin pattern references, and scattered `static final` constants duplicated across 26 files. A minimal layered domain extraction (separating Controller → Service → Domain → Repository) preserves 100% behavioral parity and all COBOL traceability comments while improving maintainability, testability via service interfaces, and single-responsibility compliance. Full DDD tactical patterns would introduce aggregate/value-object complexity without commensurate benefit for a translated monolith. Microservice decomposition violates Decisions D-005, D-010, D-014 (single deployable monolith). Rewriting business logic breaks the 100% behavioral parity mandate. | Risk of test regressions during class relocations; mitigated by the requirement that all 55 existing test files (3 E2E, 16 integration, 36 unit) continue passing with import-only updates and zero assertion changes (AAP Rule R-003). Risk of breaking COBOL traceability Javadoc; mitigated by Rule R-004 requiring every extracted method carries its `@see` and paragraph-mapping comments verbatim. Risk of import churn creating merge conflicts; mitigated by executing the entire refactor in a single atomic change set (AAP Rule R-010, single-phase execution). |
+| D-020 | Spring Boot patch-version advance from 3.5.11 → 3.5.12 as a security exception to the AAP minimal-change clause | (a) Remain on 3.5.11 and mitigate CVE-2026-22732 via runtime configuration only; (b) Upgrade to Spring Boot 3.5.x next patch; (c) Upgrade to Spring Boot 3.6.x (minor version bump) | CVE-2026-22732 (CVSS 9.1 CRITICAL) affects Spring Security 6.5.0–6.5.8 and allows bypass of response-header controls through `OnCommittedResponseWrapper` when untrusted input influences `setHeader`/`setIntHeader`/`addIntHeader` combined with `Content-Length` manipulation. Spring Boot 3.5.12 bumps Spring Security to 6.5.9 which fully remediates the CVE at the library level. Option (a) was rejected because the project's OWASP dependency-check `failBuildOnCVSS=7` gate blocks builds on any CVSS≥7 finding, and runtime mitigation does not remove the vulnerable class from the classpath. Option (c) (minor bump) exceeds the scope of a security-only exception and could introduce behavioral regressions against the 100% COBOL-parity mandate. Option (b) (single patch-level advance 3.5.11→3.5.12) is the minimum change that satisfies the security gate while preserving the BOM-managed dependency surface. AAP §0.6.2 ("No external dependency additions or version changes are required") is superseded by this documented exception. | Patch-level advance within the same minor line is a low-behavioral-risk change; Spring Boot 3.5.x maintains binary compatibility within the minor range per the Spring Boot support policy. Risk of cascading version drift mitigated by BOM-managed version reconciliation (no explicit version overrides added). Risk of baseline documentation drift (AAP §0.1.1 still states 3.5.11) mitigated by this decision entry and by updating D-016 to reference D-020. All 888 existing tests (729 unit + 159 IT/E2E) continue to pass unchanged under 3.5.12, confirming behavioral parity. Future patch advances follow the same security-gated exception process: new CVE → document CVE ID/CVSS/affected component → patch-level advance → preserve all other dependency coordinates. |
 
 ---
 
@@ -300,8 +301,8 @@ Stage 4b: TransactionReportJob (TRANREPT)     ─┘ (parallel)
 | `COTRN02.bms` | `/api/transactions` | POST |
 | `COBIL00.bms` | `/api/billing/pay` | POST |
 | `CORPT00.bms` | `/api/reports/submit` | POST |
-| `COMEN01.bms` | `/api/menu/main` | GET |
-| `COADM01.bms` | `/api/menu/admin` | GET |
+| `COMEN01.bms` | `/api/menu/{type}` (type=main) | GET |
+| `COADM01.bms` | `/api/menu/{type}` (type=admin) | GET |
 | `COUSR00.bms` | `/api/admin/users` | GET (paginated) |
 | `COUSR01.bms` | `/api/admin/users` | POST |
 | `COUSR02.bms` | `/api/admin/users/{id}` | PUT |
@@ -505,7 +506,7 @@ Stage 4b: TransactionReportJob (TRANREPT)     ─┘ (parallel)
 | Guarantee | Enforcement |
 |---|---|
 | 100% behavioral parity | No business logic rewritten; only relocation and delegation |
-| All 18 REST endpoints unchanged | `docs/api-contracts.md` remains authoritative |
+| All 19 REST endpoints unchanged | `docs/api-contracts.md` remains authoritative |
 | All 22 features unchanged | F-001 through F-022 preserved |
 | All 55 existing tests pass | Import-only updates; zero assertion changes |
 | All 8 validation gates pass | `docs/validation-gates.md` unchanged |
@@ -522,6 +523,68 @@ Stage 4b: TransactionReportJob (TRANREPT)     ─┘ (parallel)
 
 ---
 
+### D-020 — Spring Boot 3.5.11 → 3.5.12 Security Exception
+
+**Affected Components:**
+- `pom.xml` — `<parent>` spring-boot-starter-parent version pinned to `3.5.12`
+- All transitively managed Spring dependencies — most notably `spring-security-core`, `spring-security-web`, `spring-security-config` reconciled to **6.5.9** via the Spring Boot 3.5.12 BOM
+- `DECISION_LOG.md` D-016 — cross-references this exception
+
+**Security Context:**
+| Attribute | Value |
+|---|---|
+| CVE Identifier | CVE-2026-22732 |
+| CVSS v3.1 Score | 9.1 (CRITICAL) |
+| CWE | CWE-113 (HTTP Response Splitting) / CWE-20 (Improper Input Validation) |
+| Affected Component | Spring Security `OnCommittedResponseWrapper` |
+| Affected Versions | Spring Security 6.5.0 – 6.5.8 (bundled with Spring Boot 3.5.0 – 3.5.11) |
+| Fixed In | Spring Security 6.5.9 (bundled with Spring Boot 3.5.12) |
+| Attack Vector | Response-header manipulation via `setHeader`/`setIntHeader`/`addIntHeader` combined with `Content-Length` can bypass response-header controls when untrusted input is reflected into response headers |
+
+**Alternatives Considered and Rejected:**
+
+| Alternative | Why Rejected |
+|---|---|
+| (a) Remain on Spring Boot 3.5.11; apply runtime-only mitigation (e.g., `StrictHttpFirewall` configuration) | The project's OWASP `dependency-check-maven` plugin is configured with `failBuildOnCVSS=7`. Any CVSS ≥ 7.0 finding breaks the `mvn verify` pipeline regardless of runtime mitigation. Runtime mitigation does not remove the vulnerable `OnCommittedResponseWrapper` class from the classpath, so the scanner still fails. |
+| (c) Upgrade to Spring Boot 3.6.x (minor version bump) | A minor version bump exceeds the scope of a security-only exception. Spring Boot 3.6.x includes configuration-property deprecations, auto-configuration changes, and potential binary-incompatible changes that would require broader regression testing against the 22-feature 100% COBOL-parity mandate (AAP §0.1.1). |
+| (d) Suppress the CVE in `dependency-check-maven` `suppressions.xml` | CVSS 9.1 CRITICAL is above the project's risk-acceptance threshold. Suppression would hide an exploitable vulnerability rather than remediate it. |
+
+**Selected Approach — Patch-Level Advance (3.5.11 → 3.5.12):**
+
+The minimum change that (1) removes the vulnerable `spring-security-*` 6.5.0–6.5.8 artifacts from the classpath, (2) satisfies the `failBuildOnCVSS=7` gate, and (3) preserves all other dependency coordinates and behavioral contracts. Only the `<parent>` version tag in `pom.xml` is advanced; no explicit dependency-version overrides are added, and no Spring Boot configuration properties, auto-configuration classes, or starters are changed.
+
+**Compatibility Verification:**
+
+| Verification | Result |
+|---|---|
+| Full test suite (`./mvnw -B -ntp clean verify -Pintegration`) | 888 tests pass (729 unit + 159 IT/E2E) with zero failures and zero errors |
+| JaCoCo coverage gate (≥80% line coverage) | All coverage checks met |
+| Spring Boot 3.5.x binary compatibility policy | Patch-level advance within the same minor line guaranteed compatible by Spring Boot support policy |
+| Application startup under `--spring.profiles.active=local` | Startup time within the Gate 1 threshold; all 27 service beans registered cleanly |
+| REST endpoint contract stability | All 19 endpoints registered identically; no signature, path, or HTTP-method changes |
+| Validation Gate 3 (batch throughput ≥100 records/sec, peak heap ≤512 MB) | Baselines preserved |
+
+**AAP Deviation Disclosure:**
+
+AAP §0.6.2 states "No external dependency additions or version changes are required." This decision constitutes an explicit, documented security exception to that clause. The AAP §0.1.1 reference to Spring Boot 3.5.11 is thereby superseded by this entry. Future patch-level advances follow the same process:
+
+1. Identify new CVE affecting Spring Boot 3.5.x with CVSS ≥ 7.0
+2. Record CVE ID, CVSS score, affected component, and fixed-in version
+3. Advance `pom.xml` parent version by the minimum patch level that remediates the CVE
+4. Run `./mvnw -B -ntp clean verify -Pintegration` to confirm all 888 tests pass unchanged
+5. Add a new decision entry (`D-02N`) or append a row to this entry's history table documenting the advance
+
+**Risks and Mitigations:**
+
+| Risk | Mitigation |
+|---|---|
+| Cascading version drift (transitively upgrading unrelated libraries) | BOM-managed version reconciliation; no explicit `<dependency>` version overrides added |
+| Baseline documentation drift (AAP §0.1.1 still states 3.5.11) | This decision entry plus updated D-016 rationale serve as the authoritative current-version reference |
+| Behavioral regressions at the library level | Full 888-test suite continues to pass under 3.5.12; COBOL-parity E2E tests (3 files, 3,746 lines) pass unchanged |
+| Future operator confusion (why does code ship with 3.5.12 when AAP says 3.5.11?) | D-020 is referenced from D-016, from `README.md`, and indirectly from operator-facing documentation |
+
+---
+
 ## Appendix: Decision Categories
 
 | Category | Decisions |
@@ -533,6 +596,6 @@ Stage 4b: TransactionReportJob (TRANREPT)     ─┘ (parallel)
 | **Data Persistence** | D-006 (PostgreSQL), D-007 (Flyway), D-008 (Spring Data JPA) |
 | **API Design** | D-011 (REST API) |
 | **Testing** | D-012 (Testcontainers) |
-| **Build & Runtime** | D-014 (Maven), D-015 (Java 25), D-016 (Spring Boot 3.5.x) |
+| **Build & Runtime** | D-014 (Maven), D-015 (Java 25), D-016 (Spring Boot 3.5.x), D-020 (Spring Boot 3.5.11 → 3.5.12 Security Exception) |
 | **Observability** | D-017 (Structured Logging), D-018 (Micrometer + OpenTelemetry) |
 | **Code Architecture** | D-019 (Layered Domain-Driven Refactoring) |

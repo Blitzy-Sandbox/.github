@@ -218,7 +218,7 @@ Per AAP §0.8.1 R-005 ("Validation gate compliance — All 8 gates in `docs/vali
 | # | Endpoint                              | Controller Bean          | Verification                               |
 |---|---------------------------------------|--------------------------|--------------------------------------------|
 | 1 | `POST /api/auth/signin`               | `authController`         | 200 OK with valid creds, 401 with bad creds |
-| 2 | `GET /api/menu`                       | `menuController`         | 200 OK with basic auth                      |
+| 2 | `GET /api/menu/{type}`                | `menuController`         | 200 OK with basic auth (type=main or admin) |
 | 3 | `GET /api/accounts/{acctId}`          | `accountController`      | 200 OK with valid account                   |
 | 4 | `GET /api/cards/{cardNum}`            | `cardController`         | 200 OK with masked card number              |
 | 5 | `GET /api/transactions/{tranId}`      | `transactionController`  | 200 OK with valid transaction               |

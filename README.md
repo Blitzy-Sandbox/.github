@@ -345,8 +345,7 @@ POSTTRAN → INTCALC → COMBTRAN → CREASTMT (4a)
 | `POST` | `/api/admin/users` | `UserAdminController` | Add user (admin only) |
 | `PUT` | `/api/admin/users/{id}` | `UserAdminController` | Update user (admin only) |
 | `DELETE` | `/api/admin/users/{id}` | `UserAdminController` | Delete user (admin only) |
-| `GET` | `/api/menu/main` | `MenuController` | Main menu options |
-| `GET` | `/api/menu/admin` | `MenuController` | Admin menu options |
+| `GET` | `/api/menu/{type}` | `MenuController` | Menu options — `type=main` (10 options, USER+) or `type=admin` (4 options, ADMIN-only) |
 
 > For full request/response schemas and examples, see [`docs/api-contracts.md`](docs/api-contracts.md).
 

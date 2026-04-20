@@ -986,6 +986,53 @@ When adding a new handler:
 3. Use the colocated `ErrorResponse` record for consistent error payloads
 4. Add an integration test verifying the HTTP status code and error body
 
+### 9.12 Actuator `/beans` Endpoint Does Not Report `@Primary` Flag
+
+When diagnosing Spring bean wiring — particularly the five aggregator services that use `@Primary` to resolve ambiguity between multiple implementations of the same interface (`AccountServiceImpl`, `AdminServiceImpl`, `CardServiceImpl`, `MenuServiceImpl`, `TransactionServiceImpl`) — do **not** rely on the `primary` field returned by the `/actuator/beans` endpoint.
+
+**Observed limitation:**
+
+```bash
+$ curl -s -u admin:admin http://localhost:8080/actuator/beans \
+    | jq '.contexts[].beans.accountServiceImpl.primary'
+null
+```
+
+The `primary` field is returned as `null` for every bean in the `/actuator/beans` response, **even when `@Primary` is present in the source and functionally effective at injection time**. This is a known limitation of Spring Boot Actuator's `BeansEndpoint` implementation (the `BeanDefinition` introspection used by the endpoint does not consistently surface the primary flag for `@Component`-registered beans). It is **not** a defect in CardDemo and does **not** indicate that `@Primary` is missing or broken.
+
+**Correct verification approach for `@Primary` on aggregator beans:**
+
+1. **Source-level grep** (authoritative):
+
+   ```bash
+   grep -nE "@Primary" src/main/java/com/cardemo/service/**/*Impl.java
+   ```
+
+   Expected output (5 matches — one per aggregator):
+
+   ```
+   src/main/java/com/cardemo/service/account/AccountServiceImpl.java:110:@Primary
+   src/main/java/com/cardemo/service/admin/AdminServiceImpl.java:101:@Primary
+   src/main/java/com/cardemo/service/card/CardServiceImpl.java:116:@Primary
+   src/main/java/com/cardemo/service/menu/MenuServiceImpl.java:95:@Primary
+   src/main/java/com/cardemo/service/transaction/TransactionServiceImpl.java:80:@Primary
+   ```
+
+2. **Startup log check** (runtime confirmation): A successful application start with zero `NoUniqueBeanDefinitionException`, `UnsatisfiedDependencyException`, or `BeanCreationException` entries confirms that `@Primary` is effective. If `@Primary` were missing or mis-applied, Spring would fail fast during context initialization because controllers (`AccountController`, `UserAdminController`, etc.) inject the interface type and two or more candidate beans would be present.
+
+   ```bash
+   # After starting the app, confirm clean bean wiring:
+   grep -cE "NoUniqueBeanDefinitionException|UnsatisfiedDependencyException" app-startup.log
+   # Expected: 0
+   ```
+
+3. **Controller injection smoke test** (end-to-end confirmation): Hitting any controller endpoint that depends on an aggregator service (e.g., `GET /api/accounts/{id}` via `AccountController` → `AccountService` → `AccountServiceImpl`) and receiving a `2xx` response confirms that Spring resolved the ambiguity using the `@Primary` marker.
+
+**Why this matters:** The bean ambiguity guard is one of the highest-risk patterns in the CardDemo refactor (five interface types each with 2–4 candidate implementations). New contributors may reach for `/actuator/beans` to validate the wiring and be misled by the `null` `primary` field. Always prefer source-level verification plus the startup-log check. If you need a structured introspection report, emit a custom `CommandLineRunner` that iterates `ApplicationContext#getBeanNamesForType(Class)` and logs which bean is returned by `ApplicationContext#getBean(Class)` — the bean returned by the class-only lookup is by definition the `@Primary` bean.
+
+**Reference:** See `docs/api-contracts.md` for the controller-to-service mapping and `AAP §0.7.3` for the aggregator interface granularity rationale.
+
+
 ---
 
 ## 10. How to Extend
