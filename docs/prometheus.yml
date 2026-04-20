@@ -1,0 +1,135 @@
+# =============================================================================
+# CardDemo — Prometheus Scrape Configuration
+# =============================================================================
+#
+# Scrape configuration for the CardDemo Spring Boot 3.x / Java 25 application
+# migrated from COBOL/CICS/VSAM/JCL on z/OS.
+#
+# Bound by docker-compose.yml service `prometheus` at
+#   ./docs/prometheus.yml -> /etc/prometheus/prometheus.yml (read-only)
+#
+# AAP References:
+#   §0.3.1  — docs/ observability artifacts are in scope
+#   §0.7.1  — Observability stack requirements (Jaeger, Prometheus, Grafana)
+#   D-018   — Micrometer + OpenTelemetry + Prometheus exporter + Logstash encoder
+#
+# Decision D-018 Custom Business Metrics (exposed by MetricsConfig.java at
+# /actuator/prometheus; Micrometer converts `.` to `_` and appends `_total` to
+# Counters and `_USD` to the DistributionSummary with baseUnit("USD")):
+#
+#   carddemo_batch_records_processed_total
+#     — Counter, tagged by `job`
+#     — Source: MetricsConfig.METRIC_BATCH_PROCESSED
+#
+#   carddemo_batch_records_rejected_total
+#     — Counter, tagged by `job`, `reason` (100|101|102|103|109)
+#     — Source: MetricsConfig.METRIC_BATCH_REJECTED
+#
+#   carddemo_auth_attempts_total
+#     — Counter, tagged by `outcome` (success|failure)
+#     — Source: MetricsConfig.METRIC_AUTH_ATTEMPTS
+#
+#   carddemo_transaction_amount_total_USD (DistributionSummary)
+#     — `_sum`, `_count`, `_max`, `_bucket` (histogram), plus client-side
+#       quantiles at p50/p95/p99 (see MetricsConfig.transactionAmountSummary).
+#     — Source: MetricsConfig.METRIC_TRANSACTION_AMOUNT
+#
+# Common Prometheus labels applied by Micrometer via application.yml
+# (management.metrics.tags.application=carddemo, environment=${SPRING_PROFILES_ACTIVE:default}):
+#   application="carddemo"
+#   environment="<spring-profile>"
+#
+# Two targets are declared under the `carddemo` job so the same configuration
+# works whether the application runs as a compose service (targets `app:8080`
+# via the compose default network) or runs on the host alongside the compose
+# stack (targets `host.docker.internal:8080`, enabled by the `extra_hosts:
+# host.docker.internal:host-gateway` directive on the `prometheus` service in
+# docker-compose.yml). Prometheus marks the unreachable target as `down` and
+# scrapes whichever is live without manual reconfiguration.
+#
+# To reload config without restart (enabled via --web.enable-lifecycle):
+#   curl -s -X POST http://localhost:9090/-/reload
+# =============================================================================
+
+global:
+  # How frequently Prometheus pulls metrics from each target. 15s aligns with
+  # Spring Boot Actuator scrape recommendations and supports sub-minute
+  # resolution in the Grafana dashboard (docs/grafana-dashboard.json).
+  scrape_interval: 15s
+
+  # How frequently recording/alerting rules are evaluated. Matched to scrape
+  # interval for deterministic rule evaluation.
+  evaluation_interval: 15s
+
+  # Individual scrape request timeout. Must be < scrape_interval. 10s is
+  # generous for an in-network /actuator/prometheus call (<100ms typical).
+  scrape_timeout: 10s
+
+  # Labels attached to any time series or alerts communicated to external
+  # systems (federation, remote_write, alertmanager). Useful when federating
+  # carddemo-local metrics into a shared Prometheus/Grafana fleet.
+  external_labels:
+    monitor: "carddemo-local"
+    application: "carddemo"
+
+# -----------------------------------------------------------------------------
+# Recording / Alerting Rule Files
+# -----------------------------------------------------------------------------
+# None configured for the local developer stack. Production deployments can
+# add SLO/SLI recording rules and alerting rules here (e.g., request rate
+# exceeds baseline, error budget burn, batch job failure).
+# -----------------------------------------------------------------------------
+rule_files: []
+
+# -----------------------------------------------------------------------------
+# Scrape Configurations
+# -----------------------------------------------------------------------------
+# Each job defines a set of instances for Prometheus to scrape and annotates
+# the resulting time series with the `job` label.
+# -----------------------------------------------------------------------------
+scrape_configs:
+
+  # ---------------------------------------------------------------------------
+  # Job: prometheus — self-scrape
+  # ---------------------------------------------------------------------------
+  # Monitors Prometheus itself (scrape duration, rule evaluation, TSDB health).
+  # The UI panels in Grafana rely on `up{job="prometheus"}` for availability
+  # health checks of the observability stack.
+  # ---------------------------------------------------------------------------
+  - job_name: "prometheus"
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets:
+          - "localhost:9090"
+        labels:
+          service: "prometheus"
+          component: "observability"
+
+  # ---------------------------------------------------------------------------
+  # Job: carddemo — application metrics
+  # ---------------------------------------------------------------------------
+  # Scrapes the Spring Boot Actuator Prometheus endpoint exposed by the
+  # Micrometer PrometheusMeterRegistry. Exposes JVM, HTTP, HikariCP, Spring
+  # Batch, and custom CardDemo business metrics (see header).
+  #
+  # Dual-target design (see header notes) makes this config robust to either
+  # deployment mode:
+  #   - `app:8080`                  — container deployment via
+  #                                    `docker compose --profile app up -d`
+  #   - `host.docker.internal:8080` — host deployment via
+  #                                    `./mvnw spring-boot:run ...`
+  # ---------------------------------------------------------------------------
+  - job_name: "carddemo"
+    metrics_path: /actuator/prometheus
+    scheme: http
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - "app:8080"
+          - "host.docker.internal:8080"
+        labels:
+          service: "carddemo"
+          component: "application"
