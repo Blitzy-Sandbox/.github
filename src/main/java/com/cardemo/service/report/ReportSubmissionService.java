@@ -25,6 +25,7 @@ import jakarta.annotation.PostConstruct;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +33,7 @@ import com.cardemo.domain.constants.DateFormatConstants;
 import com.cardemo.exception.CardDemoException;
 import com.cardemo.exception.ValidationException;
 import com.cardemo.model.dto.ReportRequest;
+import com.cardemo.observability.CorrelationIdFilter;
 import com.cardemo.service.interfaces.ReportService;
 import com.cardemo.service.shared.DateValidationService;
 import com.cardemo.service.shared.DateValidationService.DateValidationResult;
@@ -40,6 +42,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SqsException;
 
@@ -352,6 +355,15 @@ public class ReportSubmissionService implements ReportService {
      *   <li>{@code messageDeduplicationId} = UUID — ensures uniqueness per submission</li>
      * </ul>
      *
+     * <p><strong>Observability — Correlation ID propagation:</strong> The correlation
+     * ID from the current HTTP request (set by {@link CorrelationIdFilter} into SLF4J
+     * MDC under key {@value CorrelationIdFilter#CORRELATION_ID_MDC_KEY}) is attached
+     * as an SQS {@code MessageAttribute} on every published message. This preserves
+     * distributed tracing across the async boundary: the downstream batch consumer
+     * that processes the report submission can read the {@code correlationId}
+     * attribute and log/trace back to the originating HTTP request, avoiding
+     * observability blind spots in production incident response.</p>
+     *
      * @param reportName the report type name (Monthly/Yearly/Custom)
      * @param startDate  the report start date
      * @param endDate    the report end date
@@ -374,19 +386,30 @@ public class ReportSubmissionService implements ReportService {
             throw new CardDemoException("Unable to serialize report parameters");
         }
 
+        // Build SQS MessageAttributes map propagating the correlation ID from MDC.
+        // This bridges the synchronous HTTP request context (web filter → MDC) to the
+        // asynchronous SQS consumer context, enabling distributed tracing across the
+        // async boundary. The correlationId is only attached when present in MDC
+        // (typical case: HTTP-triggered submission); direct service calls without a
+        // request context will omit the attribute, which is the desired behavior.
+        Map<String, MessageAttributeValue> messageAttributes = buildMessageAttributes();
+
         try {
             // Build SQS FIFO send request
             // messageGroupId ensures FIFO ordering within the report-submissions group
             // messageDeduplicationId ensures each submission is unique (required for FIFO queues)
+            // messageAttributes carries correlation ID for cross-service distributed tracing
             SendMessageRequest sendRequest = SendMessageRequest.builder()
                     .queueUrl(ensureQueueUrl())
                     .messageBody(messageBody)
                     .messageGroupId(MESSAGE_GROUP_ID)
                     .messageDeduplicationId(UUID.randomUUID().toString())
+                    .messageAttributes(messageAttributes)
                     .build();
 
             sqsClient.sendMessage(sendRequest);
-            log.debug("SQS message published successfully to queue: {}", reportQueueUrl);
+            log.debug("SQS message published successfully to queue: {} (attributes: {})",
+                    reportQueueUrl, messageAttributes.keySet());
 
         } catch (SqsException e) {
             // Preserves COBOL error text from WIRTE-JOBSUB-TDQ (lines 531-532):
@@ -399,6 +422,45 @@ public class ReportSubmissionService implements ReportService {
                     null,
                     e);
         }
+    }
+
+    /**
+     * Builds the SQS {@link MessageAttributeValue} map for an outbound report-submission
+     * message, propagating observability context from the current execution context
+     * (SLF4J MDC) into SQS message metadata.
+     *
+     * <p><strong>Correlation ID propagation:</strong> When the current thread's MDC
+     * contains a correlation ID under key
+     * {@value CorrelationIdFilter#CORRELATION_ID_MDC_KEY} (as set by
+     * {@link CorrelationIdFilter} on every inbound HTTP request), the value is
+     * attached as an SQS {@code String}-typed MessageAttribute with the same key
+     * name. Downstream consumers receive the correlation ID via
+     * {@code ReceiveMessageRequest.messageAttributeNames("All")} and can re-hydrate
+     * their own MDC to preserve log/trace correlation across the async boundary.</p>
+     *
+     * <p>If no correlation ID is present (e.g., direct service invocation outside
+     * an HTTP request, or batch-to-SQS scenarios), the returned map is empty but
+     * non-null — SQS accepts an empty attributes map without error.</p>
+     *
+     * <p>This addresses the observability gap identified in QA Checkpoint 6 Phase 6
+     * Issue #3: correlation ID was set into MDC by the web filter but was not flowing
+     * to SQS, breaking distributed tracing for async report processing.</p>
+     *
+     * @return a never-null map of SQS message attributes; may be empty if no
+     *         observability context is available
+     */
+    private Map<String, MessageAttributeValue> buildMessageAttributes() {
+        Map<String, MessageAttributeValue> attributes = new HashMap<>();
+        String correlationId = MDC.get(CorrelationIdFilter.CORRELATION_ID_MDC_KEY);
+        if (correlationId != null && !correlationId.isBlank()) {
+            attributes.put(
+                    CorrelationIdFilter.CORRELATION_ID_MDC_KEY,
+                    MessageAttributeValue.builder()
+                            .dataType("String")
+                            .stringValue(correlationId)
+                            .build());
+        }
+        return attributes;
     }
 
     /**

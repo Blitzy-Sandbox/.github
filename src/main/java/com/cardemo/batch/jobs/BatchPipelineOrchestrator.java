@@ -1,5 +1,6 @@
 package com.cardemo.batch.jobs;
 
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobExecutionListener;
@@ -20,6 +21,15 @@ import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.cardemo.config.AwsConfig;
+
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sns.model.CreateTopicRequest;
+import software.amazon.awssdk.services.sns.model.CreateTopicResponse;
+import software.amazon.awssdk.services.sns.model.PublishRequest;
+import software.amazon.awssdk.services.sns.model.PublishResponse;
+import software.amazon.awssdk.services.sns.model.SnsException;
 
 /**
  * 5-Stage Nightly Batch Pipeline Orchestrator.
@@ -77,12 +87,15 @@ public class BatchPipelineOrchestrator {
      *                                    → FAILED  → pipeline stops
      * </pre>
      *
-     * @param jobRepository  Spring Batch job metadata repository
-     * @param postingStep    Stage 1: Daily Transaction Posting (POSTTRAN / CBTRN02C)
-     * @param interestStep   Stage 2: Interest Calculation (INTCALC / CBACT04C)
-     * @param combineStep    Stage 3: Combine Transactions (COMBTRAN / DFSORT+REPRO)
-     * @param statementStep  Stage 4a: Statement Generation (CREASTMT / CBSTM03A+B) — parallel
-     * @param reportStep     Stage 4b: Transaction Report (TRANREPT / CBTRN03C) — parallel
+     * @param jobRepository    Spring Batch job metadata repository
+     * @param postingStep      Stage 1: Daily Transaction Posting (POSTTRAN / CBTRN02C)
+     * @param interestStep     Stage 2: Interest Calculation (INTCALC / CBACT04C)
+     * @param combineStep      Stage 3: Combine Transactions (COMBTRAN / DFSORT+REPRO)
+     * @param statementStep    Stage 4a: Statement Generation (CREASTMT / CBSTM03A+B) — parallel
+     * @param reportStep       Stage 4b: Transaction Report (TRANREPT / CBTRN03C) — parallel
+     * @param pipelineListener Job lifecycle listener wired separately so Spring can
+     *                         inject its own dependencies (SnsClient, AwsConfig) —
+     *                         see {@link #pipelineListener(SnsClient, AwsConfig)}
      * @return the fully wired 5-stage pipeline Job
      */
     @Bean("batchPipelineJob")
@@ -92,7 +105,8 @@ public class BatchPipelineOrchestrator {
             @Qualifier("interestCalculationStep") Step interestStep,
             @Qualifier("combineTransactionsStep") Step combineStep,
             @Qualifier("statementGenerationStep") Step statementStep,
-            @Qualifier("transactionReportStep") Step reportStep) {
+            @Qualifier("transactionReportStep") Step reportStep,
+            JobExecutionListener pipelineListener) {
 
         // Stage 1 wrapped in Flow — required for JobBuilder.start(Flow) to enable
         // flow-based pipeline with deciders and parallel execution
@@ -124,7 +138,7 @@ public class BatchPipelineOrchestrator {
         //   Stage2(INTCALC) → Stage3(COMBTRAN) → [Stage4a(CREASTMT) ‖ Stage4b(TRANREPT)]
         return new JobBuilder("batchPipelineJob", jobRepository)
                 .incrementer(new RunIdIncrementer())
-                .listener(pipelineListener())
+                .listener(pipelineListener)
                 .start(stage1Flow)
                 .next(conditionCodeDecider())
                 .on(DECIDER_STATUS_CONTINUE).to(interestStep)
@@ -207,17 +221,35 @@ public class BatchPipelineOrchestrator {
     }
 
     /**
-     * Pipeline lifecycle listener for structured logging and performance metrics.
+     * Pipeline lifecycle listener for structured logging, performance metrics, and
+     * SNS-based failure alerting.
      *
      * <p>Logs pipeline start and completion events with timestamps for Gate 3
      * (Performance Baseline) evidence. Captures failure details for diagnostic purposes.
      * All log messages flow through logstash-logback-encoder for structured JSON output
      * with correlation IDs and trace context per AAP §0.7.1 observability requirements.
      *
-     * @return a JobExecutionListener for pipeline lifecycle logging
+     * <p><strong>SNS Alerting (AAP §0.3.1):</strong> When the pipeline completes with
+     * {@link BatchStatus#FAILED}, {@code afterJob()} publishes a structured alert message
+     * to the {@code carddemo-batch-alerts} SNS topic (configurable via
+     * {@code carddemo.aws.sns.batch-alerts-topic}). The topic ARN is resolved idempotently
+     * via {@link SnsClient#createTopic(CreateTopicRequest)} — this returns the existing
+     * ARN if the topic already exists, or creates it otherwise, matching standard AWS
+     * alerting patterns. SNS failures are caught and logged; they never propagate to the
+     * batch job status, preserving the integrity of the Spring Batch exit code per the
+     * minimal change clause (AAP §0.8.1 R-001).
+     *
+     * <p>Success paths (COMPLETED, STOPPED) emit structured log entries only and do not
+     * publish to SNS, keeping the SNS topic signal-focused on actionable alerts.
+     *
+     * @param snsClient SNS client bean from {@link AwsConfig#snsClient()} used to publish
+     *                  pipeline-failure alerts
+     * @param awsConfig Configuration holder providing {@link AwsConfig#getBatchAlertsTopic()}
+     *                  for topic name resolution (default: {@code carddemo-batch-alerts})
+     * @return a JobExecutionListener for pipeline lifecycle logging and failure alerting
      */
     @Bean
-    public JobExecutionListener pipelineListener() {
+    public JobExecutionListener pipelineListener(SnsClient snsClient, AwsConfig awsConfig) {
         return new JobExecutionListener() {
 
             @Override
@@ -247,7 +279,118 @@ public class BatchPipelineOrchestrator {
                         log.error("Pipeline failure detail: {}", ex.getMessage(), ex);
                     }
                 }
+
+                // AAP §0.3.1 — SNS alert notifications for batch pipeline FAILED status.
+                // Publishes a structured alert to the carddemo-batch-alerts topic so that
+                // operators can detect overnight pipeline failures without tailing logs.
+                // Only publishes on FAILED to keep SNS signal-focused on actionable alerts.
+                if (jobExecution.getStatus() == BatchStatus.FAILED) {
+                    publishFailureAlert(snsClient, awsConfig, jobExecution);
+                }
             }
         };
+    }
+
+    /**
+     * Publishes a pipeline-failure alert to the configured SNS topic.
+     *
+     * <p>Resolves the topic ARN idempotently via {@code createTopic} (AWS-documented
+     * behavior: returns existing ARN if topic already exists, otherwise creates it),
+     * then publishes a short subject line and a multi-line message body summarizing
+     * the failure. All SNS exceptions are caught and logged at ERROR level; they never
+     * propagate out of this method. This ensures that an alerting outage does not
+     * change the Spring Batch job exit status, which would violate the behavior-parity
+     * rule (AAP §0.8.1 R-001) — batch pipeline exit codes are externally observable
+     * contracts used by JCL-equivalent orchestration.
+     *
+     * <p>The subject is bounded to stay within AWS's 100-character SNS subject limit:
+     * {@code "[CardDemo Batch] Pipeline FAILED (ExecutionId=<id>)"}.
+     *
+     * @param snsClient    the SNS client to use for the publish call
+     * @param awsConfig    configuration holder for the topic name lookup
+     * @param jobExecution the failed job execution to summarize in the alert
+     */
+    private void publishFailureAlert(SnsClient snsClient,
+                                     AwsConfig awsConfig,
+                                     JobExecution jobExecution) {
+        String topicName = awsConfig.getBatchAlertsTopic();
+        try {
+            // createTopic is idempotent in AWS SNS — returns existing ARN if the topic
+            // already exists; otherwise creates it. This avoids the need to cache ARNs
+            // or fail if LocalStack / fresh environments lack pre-provisioned topics.
+            CreateTopicResponse topicResponse = snsClient.createTopic(
+                    CreateTopicRequest.builder().name(topicName).build());
+            String topicArn = topicResponse.topicArn();
+
+            String subject = buildFailureAlertSubject(jobExecution);
+            String message = buildFailureAlertMessage(jobExecution);
+
+            PublishResponse publishResponse = snsClient.publish(PublishRequest.builder()
+                    .topicArn(topicArn)
+                    .subject(subject)
+                    .message(message)
+                    .build());
+
+            log.info("Published batch-failure alert to SNS — topic={}, messageId={}",
+                    topicName, publishResponse.messageId());
+        } catch (SnsException ex) {
+            // Never propagate SNS alerting failures — they must not alter batch job status.
+            log.error("Failed to publish batch-failure SNS alert (topic={}): {}",
+                    topicName, ex.getMessage(), ex);
+        }
+    }
+
+    /**
+     * Builds the SNS subject line for a batch-failure alert.
+     *
+     * <p>Kept under AWS's 100-character SNS subject limit. Format:
+     * {@code "[CardDemo Batch] Pipeline FAILED (ExecutionId=<id>)"}.
+     *
+     * @param jobExecution the failed job execution
+     * @return a subject string suitable for SNS
+     */
+    private String buildFailureAlertSubject(JobExecution jobExecution) {
+        return "[CardDemo Batch] Pipeline FAILED (ExecutionId=" + jobExecution.getId() + ")";
+    }
+
+    /**
+     * Builds the multi-line SNS message body summarizing a batch-failure event.
+     *
+     * <p>Includes status, execution ID, job instance ID, start/end timestamps, and
+     * a compact listing of all failure exceptions with their class names and messages.
+     *
+     * @param jobExecution the failed job execution
+     * @return a multi-line message string summarizing the failure
+     */
+    private String buildFailureAlertMessage(JobExecution jobExecution) {
+        StringBuilder message = new StringBuilder(512);
+        message.append("CardDemo nightly batch pipeline failed.\n\n");
+        message.append("Status:       ").append(jobExecution.getStatus()).append('\n');
+        message.append("ExecutionId:  ").append(jobExecution.getId()).append('\n');
+        Long instanceId = jobExecution.getJobInstance() != null
+                ? jobExecution.getJobInstance().getInstanceId() : null;
+        message.append("InstanceId:   ").append(instanceId).append('\n');
+        message.append("StartTime:    ").append(jobExecution.getStartTime()).append('\n');
+        message.append("EndTime:      ").append(jobExecution.getEndTime()).append('\n');
+        message.append("ExitStatus:   ").append(jobExecution.getExitStatus()).append('\n');
+
+        if (jobExecution.getAllFailureExceptions() != null
+                && !jobExecution.getAllFailureExceptions().isEmpty()) {
+            message.append("\nFailures (")
+                    .append(jobExecution.getAllFailureExceptions().size())
+                    .append("):\n");
+            int index = 1;
+            for (Throwable ex : jobExecution.getAllFailureExceptions()) {
+                message.append("  ").append(index++).append(". ")
+                        .append(ex.getClass().getSimpleName())
+                        .append(": ")
+                        .append(ex.getMessage())
+                        .append('\n');
+            }
+        } else {
+            message.append("\nNo failure exceptions captured on JobExecution.\n");
+        }
+
+        return message.toString();
     }
 }
