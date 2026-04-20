@@ -48,12 +48,14 @@ import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
@@ -388,6 +390,82 @@ public class GlobalExceptionHandler {
                 HttpStatus.UNSUPPORTED_MEDIA_TYPE, message,
                 "UNSUPPORTED_MEDIA_TYPE", null, request);
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(response);
+    }
+
+    /**
+     * Handles {@link MultipartException} — returned when multipart request parsing
+     * fails (e.g., missing multipart boundary, malformed multipart envelope, or
+     * a raw {@code FileUploadException} from the servlet container).
+     *
+     * <p>Returns HTTP 415 (Unsupported Media Type) instead of the default 500
+     * that Spring's fallback generic-{@code Exception} handler would otherwise
+     * produce. A request with {@code Content-Type: multipart/form-data} but no
+     * boundary parameter is semantically a malformed content-type declaration —
+     * the same category as any other unsupported media type — so 415 is the
+     * correct status code and aligns with the existing
+     * {@link HttpMediaTypeNotSupportedException} handler that also returns 415.</p>
+     *
+     * <p>Without this handler, the Tomcat-layer
+     * {@code org.apache.tomcat.util.http.fileupload.FileUploadException} is
+     * wrapped by Spring's {@link MultipartException} and falls through to the
+     * generic {@code Exception} catch-all, producing an incorrect HTTP 500
+     * (per QA report MINOR Finding #3).</p>
+     *
+     * <p>No direct COBOL equivalent — BMS 3270 terminal protocol used a fixed
+     * EBCDIC encoding and had no concept of multipart/form-data envelope.
+     * CardDemo does not use multipart uploads for any documented endpoint
+     * ({@code docs/api-contracts.md}), so all multipart requests are by
+     * definition malformed or misdirected.</p>
+     *
+     * @param ex      the multipart-parsing exception from Spring MVC or Tomcat
+     * @param request the HTTP request for URI extraction
+     * @return HTTP 415 response with structured error body
+     */
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ErrorResponse> handleMultipartException(
+            MultipartException ex, HttpServletRequest request) {
+        log.warn("Multipart parsing failed for {} {}: {}",
+                request.getMethod(), request.getRequestURI(), ex.getMessage());
+        ErrorResponse response = buildErrorResponse(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                "Content type 'multipart/form-data' is not supported or is malformed. "
+                        + "Use 'application/json'.",
+                "UNSUPPORTED_MEDIA_TYPE", null, request);
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(response);
+    }
+
+    /**
+     * Handles {@link AccessDeniedException} — thrown by Spring Security or by
+     * controller-layer role checks (e.g.,
+     * {@link com.cardemo.controller.MenuController#getMenu(String)}) when the
+     * authenticated principal lacks the required authority to access a resource.
+     *
+     * <p>Returns HTTP 403 (Forbidden) with a structured error body, as required
+     * by the contract in {@code docs/api-contracts.md} &sect;9.2 (Admin Menu):
+     * "403 | Forbidden &mdash; requires ADMIN role". Without this handler,
+     * the exception falls through to the generic {@code Exception} catch-all
+     * and returns HTTP 500, violating the contract.</p>
+     *
+     * <p>In the COBOL source, this maps to the {@code CDEMO-USRTYPE = 'A'}
+     * guard in admin-only programs such as {@code COADM01C.cbl}, which would
+     * display {@code 'You are not authorized to use this option.'} on the BMS
+     * screen and return control to the sign-on screen. In the REST API target,
+     * this maps to HTTP 403 with a structured error body.</p>
+     *
+     * @param ex      the access-denied exception from Spring Security or controller
+     * @param request the HTTP request for URI extraction
+     * @return HTTP 403 response with structured error body
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDeniedException(
+            AccessDeniedException ex, HttpServletRequest request) {
+        log.warn("Access denied for {} {}: {}",
+                request.getMethod(), request.getRequestURI(), ex.getMessage());
+        ErrorResponse response = buildErrorResponse(
+                HttpStatus.FORBIDDEN,
+                ex.getMessage() != null ? ex.getMessage() : "Access denied.",
+                "FORBIDDEN", null, request);
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
     }
 
     /**

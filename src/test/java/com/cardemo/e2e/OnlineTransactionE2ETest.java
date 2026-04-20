@@ -142,6 +142,24 @@ public class OnlineTransactionE2ETest {
     @LocalServerPort
     private int port;
 
+    // ── PCI-DSS test constants ──────────────────────────────────────────────────
+    // Raw (unmasked) card number for the first card in the seed data when sorted
+    // by cardNum ascending (V3__seed_data.sql seeds 0500024453765740 as account
+    // 00000000050, active, CVV 747). CardListService paginates with
+    // Sort.by("cardNum").ascending() so this card is guaranteed to be the first
+    // page-0 entry. We use this hard-coded value because — per the PCI-DSS
+    // masking fix — the production serializer (CardNumberMaskingSerializer)
+    // returns card numbers as "************NNNN", so tests can no longer
+    // extract raw PANs from API responses. A real secure client would likewise
+    // hold the raw PAN only at card issuance / tokenization boundaries; this
+    // constant simulates that out-of-band knowledge for end-to-end verification
+    // of downstream endpoints that require the raw PAN as path/body input.
+    private static final String KNOWN_RAW_CARD_NUM = "0500024453765740";
+
+    // Regex pattern that a PCI-masked card number response MUST satisfy:
+    // twelve asterisks followed by exactly four digits (the last-4 PAN suffix).
+    private static final String MASKED_PAN_PATTERN = "^\\*{12}\\d{4}$";
+
     // ── Shared test state across ordered tests ──────────────────────────────────
     // Authentication: HTTP Basic auth credentials for all authenticated requests.
     // SecurityConfig enforces HTTP Basic via Spring Security's DaoAuthenticationProvider.
@@ -494,9 +512,37 @@ public class OnlineTransactionE2ETest {
         Number totalPages = (Number) body.get("totalPages");
         assertThat(totalPages).isNotNull();
 
-        // Store first card number for subsequent tests
+        // PCI-DSS masking verification: CardNumberMaskingSerializer MUST mask
+        // the card number in all list/detail responses as "************NNNN".
+        // This is the CRITICAL production safeguard introduced to eliminate
+        // the PCI-DSS 3.3/3.4 violation where full 16-digit PANs were leaked
+        // in JSON responses. The assertion below is a first-line guard that
+        // fails fast if the serializer is ever disabled or misconfigured.
         Map<?, ?> firstCard = (Map<?, ?>) content.get(0);
-        discoveredCardNum = String.valueOf(firstCard.get("cardNum"));
+        String responseCardNum = String.valueOf(firstCard.get("cardNum"));
+        assertThat(responseCardNum)
+                .as("PCI-DSS: response cardNum must be masked as ************NNNN")
+                .isNotBlank()
+                .matches(MASKED_PAN_PATTERN);
+
+        // The last-4 digits of the masked response MUST match the last-4 of
+        // the known first seed card (sorted ascending) — this doubly confirms
+        // that (a) the serializer is masking the CORRECT card, not substituting
+        // a different number, and (b) the Sort.by("cardNum").ascending()
+        // contract in CardListService is stable.
+        String expectedLastFour =
+                KNOWN_RAW_CARD_NUM.substring(KNOWN_RAW_CARD_NUM.length() - 4);
+        assertThat(responseCardNum)
+                .as("Masked response must preserve the true last-4 digits")
+                .endsWith(expectedLastFour);
+
+        // Use the raw card number for subsequent path/body parameters in
+        // later tests (detail, update, transaction add). A real client would
+        // hold this via out-of-band means such as card-issuance metadata,
+        // device secure element, or tokenization vault — NOT by parsing it
+        // from a list response. Assigning KNOWN_RAW_CARD_NUM here preserves
+        // that trust boundary while keeping the test deterministic.
+        discoveredCardNum = KNOWN_RAW_CARD_NUM;
         assertThat(discoveredCardNum).isNotBlank();
     }
 
@@ -515,7 +561,20 @@ public class OnlineTransactionE2ETest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         CardDto card = response.getBody();
         assertThat(card).isNotNull();
-        assertThat(card.getCardNum()).isEqualTo(discoveredCardNum);
+
+        // PCI-DSS: the CardDto deserialized from the JSON response contains
+        // the MASKED card number (************NNNN) because
+        // CardNumberMaskingSerializer masks on the outbound serialization path.
+        // Verify the mask format is applied AND that the last-4 digits match
+        // the raw card we requested via the path variable — this confirms
+        // the correct card was returned without leaking the full PAN.
+        String expectedLastFour =
+                discoveredCardNum.substring(discoveredCardNum.length() - 4);
+        assertThat(card.getCardNum())
+                .as("PCI-DSS: detail response cardNum must be masked")
+                .matches(MASKED_PAN_PATTERN)
+                .endsWith(expectedLastFour);
+
         assertThat(card.getCardAcctId()).isNotBlank();
         assertThat(card.getCardActiveStatus()).isNotNull();
         assertThat(card.getCardExpDate()).isNotNull();
@@ -537,6 +596,36 @@ public class OnlineTransactionE2ETest {
         assertThat(firstGet.getStatusCode()).isEqualTo(HttpStatus.OK);
         Map<String, Object> originalCardData = firstGet.getBody();
         assertThat(originalCardData).isNotNull();
+
+        // PCI-DSS note: the GET response body contains a MASKED cardNum per
+        // CardNumberMaskingSerializer. However, the PUT request-body validator
+        // (CardValidator.validateCardNumber → ValidationPatterns.NUMERIC_PATTERN)
+        // requires cardNum to be purely numeric digits, so a masked value
+        // (asterisks) would fail validation with HTTP 400. We overwrite the
+        // cardNum field with the raw PAN that a real secure client would hold
+        // from out-of-band channels (card issuance metadata, tokenization
+        // vault). The PATH variable {cardNum} is the authoritative lookup key;
+        // the body's cardNum field is validated only for COBOL field-format
+        // parity (COCRDUPC.cbl 1220-EDIT-CARD-NUMBER paragraph).
+        originalCardData.put("cardNum", discoveredCardNum);
+
+        // PCI-DSS note: the GET response body OMITS the cardCvvCd field per
+        // CardDto.cardCvvCd @JsonProperty(access = WRITE_ONLY) annotation —
+        // CVV codes must never be returned in read responses (PCI-DSS 3.2
+        // prohibits CVV storage or exposure in responses). However, the
+        // WRITE_ONLY access mode explicitly PERMITS inbound deserialization,
+        // so PUT/POST request bodies MAY (and for updates MUST) include the
+        // cardCvvCd field — Jackson will populate it into the server-side
+        // CardDto before the service layer maps it back onto the JPA entity.
+        // The database enforces cards.card_cvv_cd NOT NULL, so the PUT body
+        // must explicitly supply the CVV that a secure client would hold
+        // from the same out-of-band issuance channel that provides the PAN.
+        // For seed card 0500024453765740, the known CVV is 747 (see
+        // V3__seed_data.sql). Omitting this field would cause the JPA
+        // saveAndFlush() call to attempt card_cvv_cd=NULL and violate the
+        // PostgreSQL NOT NULL constraint with HTTP 500 (COCRDUPC.cbl
+        // 1230-EDIT-CARD-CVV paragraph).
+        originalCardData.put("cardCvvCd", "747");
 
         // Keep a snapshot with the stale version for the second (conflicting) update
         Map<String, Object> staleCardData = new HashMap<>(originalCardData);
@@ -671,8 +760,20 @@ public class OnlineTransactionE2ETest {
                 .as("Transaction amount must be preserved with exact precision")
                 .isEqualTo(0);
 
-        // Cross-reference resolution: card → account mapping worked
-        assertThat(created.getTranCardNum()).isEqualTo(discoveredCardNum);
+        // Cross-reference resolution: card → account mapping worked. The
+        // response's tranCardNum is PCI-masked by CardNumberMaskingSerializer
+        // (************NNNN) because TransactionDto.tranCardNum carries the
+        // same @JsonSerialize(using = CardNumberMaskingSerializer.class)
+        // annotation as CardDto.cardNum — a defense-in-depth measure so that
+        // no transaction response leaks the full PAN either. Verify masking
+        // format and last-4 match to confirm the same card we submitted was
+        // persisted without leaking the raw PAN.
+        String expectedLastFour =
+                discoveredCardNum.substring(discoveredCardNum.length() - 4);
+        assertThat(created.getTranCardNum())
+                .as("PCI-DSS: transaction response tranCardNum must be masked")
+                .matches(MASKED_PAN_PATTERN)
+                .endsWith(expectedLastFour);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

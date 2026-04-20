@@ -5,6 +5,10 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,9 +34,13 @@ import com.cardemo.service.menu.MainMenuService;
  *   <li>COADM01C.cbl (268 lines) — BUILD-MENU-OPTIONS paragraph → {@code GET /api/menu/admin}</li>
  * </ul>
  *
- * <p>Admin menu access control is enforced by Spring Security (SecurityConfig),
- * NOT by this controller. This controller is purely a read-only metadata provider
- * with no business logic.</p>
+ * <p>Admin menu access control is enforced by this controller via a
+ * {@link SecurityContextHolder}-based role check (see {@link #isAdmin()}).
+ * The {@code GET /api/menu/admin} endpoint returns HTTP 403 Forbidden when
+ * the authenticated principal does not hold {@code ROLE_ADMIN}, satisfying
+ * the contract documented in {@code docs/api-contracts.md} §9.2. The
+ * {@code GET /api/menu/main} endpoint remains accessible to any
+ * authenticated principal regardless of role.</p>
  *
  * @see com.cardemo.service.interfaces.MenuService
  * @see MainMenuService.MenuOption
@@ -92,9 +100,13 @@ public class MenuController {
      * @return {@code ResponseEntity} containing:
      *         <ul>
      *           <li>HTTP 200 with {@code List<MenuOption>} for type "main"</li>
-     *           <li>HTTP 200 with {@code List<AdminMenuOption>} for type "admin"</li>
+     *           <li>HTTP 200 with {@code List<AdminMenuOption>} for type "admin"
+     *               (requires {@code ROLE_ADMIN})</li>
      *           <li>HTTP 400 with error message for any other type</li>
      *         </ul>
+     * @throws AccessDeniedException when {@code type == "admin"} and the authenticated
+     *         principal does not hold {@code ROLE_ADMIN}; mapped to HTTP 403 Forbidden
+     *         by {@link com.cardemo.config.GlobalExceptionHandler}
      */
     @GetMapping("/{type}")
     public ResponseEntity<?> getMenu(@PathVariable String type) {
@@ -106,11 +118,56 @@ public class MenuController {
         }
 
         if ("admin".equalsIgnoreCase(type)) {
+            // Contract: docs/api-contracts.md §9.2 Admin Menu — mandates 403 for
+            // non-admin callers. We check the authenticated principal here rather
+            // than relying on URL-pattern-based SecurityConfig rules so that the
+            // admin-menu contract is enforced in the controller layer that owns
+            // the path variable branching logic. COBOL parity: COADM01C.cbl
+            // enforced admin-only access via the EIBTRNID / CDEMO-USRTYPE lookup
+            // that gated the BUILD-MENU-OPTIONS paragraph — this isAdmin() check
+            // is the REST-equivalent of that CDEMO-USRTYPE = 'A' guard.
+            if (!isAdmin()) {
+                logger.warn("Access denied: non-admin user attempted to retrieve admin menu");
+                throw new AccessDeniedException("Access denied: ADMIN role required for admin menu");
+            }
             List<AdminMenuService.AdminMenuOption> adminMenuOptions = menuService.getAdminMenuOptions();
             return ResponseEntity.ok(adminMenuOptions);
         }
 
         logger.info("Invalid menu type requested: {}", type);
         throw new ValidationException("Invalid menu type. Use 'main' or 'admin'.");
+    }
+
+    /**
+     * Returns {@code true} when the current {@link SecurityContextHolder} principal
+     * holds the {@code ROLE_ADMIN} granted authority.
+     *
+     * <p>Used to enforce the admin-menu authorization contract (see
+     * {@code docs/api-contracts.md} §9.2) in the controller layer. Returns
+     * {@code false} when no {@link Authentication} is present (e.g., when
+     * Spring Security has not yet populated the context, which would have
+     * already produced an HTTP 401 upstream) or when the authorities collection
+     * does not contain {@code ROLE_ADMIN}.</p>
+     *
+     * <p>COBOL parity: in COADM01C.cbl, the equivalent gate inspected
+     * {@code CDEMO-USRTYPE} (derived from USRSEC file field {@code SEC-USR-TYPE})
+     * for the 'A' character. Here we inspect the SpringSecurity-derived
+     * {@code ROLE_ADMIN} authority, which is assigned when {@code secUsrType == 'A'}
+     * during authentication in {@code AuthenticationService.buildSignOnResponse()}.</p>
+     *
+     * @return {@code true} if the current authenticated user has {@code ROLE_ADMIN};
+     *         {@code false} otherwise (including when no authentication is present)
+     */
+    private boolean isAdmin() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            return false;
+        }
+        for (GrantedAuthority authority : authentication.getAuthorities()) {
+            if ("ROLE_ADMIN".equals(authority.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

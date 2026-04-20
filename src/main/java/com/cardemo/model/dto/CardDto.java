@@ -2,6 +2,10 @@ package com.cardemo.model.dto;
 
 import java.time.LocalDate;
 
+import com.cardemo.config.CardNumberMaskingSerializer;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
 import jakarta.validation.constraints.Size;
 
 /**
@@ -35,7 +39,16 @@ import jakarta.validation.constraints.Size;
  * <p><strong>Security notes (PCI compliance):</strong>
  * <ul>
  *   <li>cardNum is masked in {@link #toString()} to show only the last 4 digits</li>
+ *   <li>cardNum is masked in outbound JSON responses via
+ *       {@link CardNumberMaskingSerializer} — first {@code length - 4}
+ *       characters replaced with {@code '*'}</li>
  *   <li>cardCvvCd is excluded from {@link #toString()} entirely</li>
+ *   <li>cardCvvCd is excluded from outbound JSON responses via
+ *       {@code @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)} — the
+ *       field is accepted on inbound create/update requests (required for
+ *       JPA persistence against the NOT NULL {@code card_cvv_cd} column) but
+ *       is never serialized to API consumers, satisfying PCI-DSS 3.2 which
+ *       prohibits CVV storage or exposure in responses</li>
  * </ul>
  */
 public class CardDto {
@@ -45,8 +58,15 @@ public class CardDto {
      * Maps to CARD-NUM PIC X(16) in CVACT02Y.cpy and CARDSIDI PIC X(16)
      * in the BMS symbolic maps. Stored as String to preserve leading zeros
      * in numeric card identifiers (COBOL PIC X allows alphanumeric content).
+     *
+     * <p>PCI-DSS: serialized to JSON via {@link CardNumberMaskingSerializer}
+     * which replaces all but the last 4 characters with {@code '*'} in
+     * outbound API responses (e.g., "4859452612877065" is emitted as
+     * "************7065"). The field value stored in the DTO, passed to
+     * persistence, and used by business rules remains the unmasked PAN.</p>
      */
     @Size(max = 16)
+    @JsonSerialize(using = CardNumberMaskingSerializer.class)
     private String cardNum;
 
     /**
@@ -95,8 +115,18 @@ public class CardDto {
      * for API-level create and update operations. Max length is 4 to accommodate
      * both 3-digit CVV and 4-digit CID formats.
      * Excluded from {@link #toString()} output for PCI compliance.
+     *
+     * <p>PCI-DSS: annotated with
+     * {@code @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)} — Jackson
+     * accepts the field when deserializing inbound request bodies (required
+     * by the PUT {@code /api/cards/{cardNum}} flow because the underlying
+     * {@code cards.card_cvv_cd} column is NOT NULL), but omits the field
+     * entirely from outbound JSON responses. This satisfies PCI-DSS 3.2
+     * (prohibition on CVV storage and exposure in responses) without
+     * breaking write-side operations that must persist the value.</p>
      */
     @Size(max = 4)
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String cardCvvCd;
 
     /**

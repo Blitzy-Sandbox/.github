@@ -149,6 +149,50 @@ public class AuthenticationService implements AuthService {
     private static final String USER_TRAN_ID = "CM01";
 
     // -----------------------------------------------------------------------
+    // Timing Attack Mitigation Constant
+    // -----------------------------------------------------------------------
+
+    /**
+     * Pre-computed BCrypt hash used for constant-time password verification on
+     * the user-not-found code path to mitigate username-enumeration timing
+     * attacks.
+     *
+     * <p><strong>Rationale (QA Finding INFO #4):</strong> Without this
+     * mitigation, an attacker can distinguish between "user does not exist"
+     * and "user exists but password is wrong" by measuring HTTP response
+     * times — the latter invokes BCrypt verification (~97 ms at cost 10)
+     * while the former short-circuits before BCrypt is called (~11 ms).
+     * That ~86 ms delta permits enumeration of valid user IDs.</p>
+     *
+     * <p><strong>Mitigation strategy:</strong> When
+     * {@link #readUserSecurityFile(String)} throws
+     * {@link RecordNotFoundException}, invoke
+     * {@link PasswordEncoder#matches(CharSequence, String)} against this
+     * dummy hash to equalize the execution time of both code paths. The
+     * comparison result is always discarded — the caught
+     * {@code RecordNotFoundException} is re-thrown unchanged to preserve
+     * the COBOL error-message contract
+     * ("User not found. Try again ...", COSGN00C.cbl line 249) and
+     * the test-expected exception type.</p>
+     *
+     * <p><strong>Hash value:</strong> A standard BCrypt hash at cost 10
+     * (matching the application's {@code BCryptPasswordEncoder} default
+     * strength configured in {@code SecurityConfig}). The hash is a
+     * well-known BCrypt placeholder for "password"; because the result of
+     * {@link PasswordEncoder#matches} is always discarded on the
+     * not-found path, a coincidental match cannot produce a successful
+     * authentication. The cost-10 prefix (<code>$2a$10$</code>) guarantees
+     * identical CPU work to verifying a stored password hashed at the
+     * same cost.</p>
+     *
+     * <p><strong>Safety note:</strong> This constant is never logged and
+     * never returned in any response. It exists solely to exercise the
+     * BCrypt verification path for timing parity.</p>
+     */
+    private static final String DUMMY_BCRYPT_HASH =
+            "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
+    // -----------------------------------------------------------------------
     // Injected Dependencies
     // -----------------------------------------------------------------------
 
@@ -270,7 +314,27 @@ public class AuthenticationService implements AuthService {
             // Maps: COSGN00C.cbl READ-USER-SEC-FILE lines 211-219
             //   EXEC CICS READ DATASET(WS-USRSEC-FILE) INTO(SEC-USER-DATA)
             //     RIDFLD(WS-USER-ID) RESP(WS-RESP-CD) RESP2(WS-REAS-CD)
-            UserSecurity user = readUserSecurityFile(normalizedUserId);
+            //
+            // Timing Attack Mitigation (QA Finding INFO #4):
+            // If the user does not exist, still exercise BCrypt verification
+            // against a dummy hash so both code paths (user-not-found and
+            // user-found-but-wrong-password) have equivalent execution time.
+            // The dummy comparison result is always discarded — the original
+            // RecordNotFoundException is re-thrown unchanged, preserving the
+            // COBOL RESP(13) → "User not found. Try again ..." contract and
+            // the distinct exception type required by AuthenticationServiceTest.
+            UserSecurity user;
+            try {
+                user = readUserSecurityFile(normalizedUserId);
+            } catch (RecordNotFoundException notFound) {
+                // Exercise the BCrypt encoder to equalize user-not-found
+                // timing with the wrong-password path. Result is deliberately
+                // discarded — we always re-throw the original exception so
+                // callers receive RecordNotFoundException (HTTP 404/401 per
+                // GlobalExceptionHandler) rather than BadCredentialsException.
+                passwordEncoder.matches(normalizedPassword, DUMMY_BCRYPT_HASH);
+                throw notFound;
+            }
 
             // Step 4 — Password verification (BCrypt replaces plaintext comparison)
             // Maps: COSGN00C.cbl line 223

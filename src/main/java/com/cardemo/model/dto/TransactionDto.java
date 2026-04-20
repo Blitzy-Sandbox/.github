@@ -3,6 +3,9 @@ package com.cardemo.model.dto;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import com.cardemo.config.CardNumberMaskingSerializer;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
 import jakarta.validation.constraints.Size;
 
 /**
@@ -29,7 +32,11 @@ import jakarta.validation.constraints.Size;
  *
  * <p><strong>PCI Security:</strong> The {@link #toString()} method masks
  * {@code tranCardNum} to show only the last 4 digits, preventing accidental
- * exposure of full card numbers in logs or debug output.</p>
+ * exposure of full card numbers in logs or debug output.
+ * In outbound JSON responses, {@code tranCardNum} is masked via
+ * {@link CardNumberMaskingSerializer} — the first {@code length - 4}
+ * characters of the PAN are replaced with {@code '*'} before serialization,
+ * e.g., "4859452612877065" becomes "************7065".</p>
  */
 public class TransactionDto {
 
@@ -93,8 +100,14 @@ public class TransactionDto {
      * <p>Maps {@code TRAN-CARD-NUM PIC X(16)} from CVTRA05Y.cpy and
      * {@code CARDNUMI PIC X(16)} from COTRN01.CPY line 72.
      * Uses {@link String} to preserve leading zeros in the 16-digit card number.</p>
+     *
+     * <p>PCI-DSS: serialized to JSON via {@link CardNumberMaskingSerializer}
+     * which replaces all but the last 4 characters with {@code '*'} in
+     * outbound API responses. The in-memory DTO value remains the unmasked
+     * PAN for internal business operations and persistence.</p>
      */
     @Size(max = 16, message = "Card number must not exceed 16 characters")
+    @JsonSerialize(using = CardNumberMaskingSerializer.class)
     private String tranCardNum;
 
     /**
