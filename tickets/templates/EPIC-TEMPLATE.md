@@ -4,7 +4,7 @@ EPIC TEMPLATE — Reusable Markdown scaffold for a parent Epic file.
 USAGE:
 - Do NOT edit this template in place. Copy this file to `tickets/EPIC-NUM-slug.md`
   (the `tickets/` root, alongside `profile/`) and fill every placeholder.
-- Replace every `[...]` placeholder text and remove every `<!-- TODO: ... -->`
+- Replace every `[...]` placeholder text and delete every TODO authoring
   HTML comment before committing.
 - Epics decompose into 1–3 child Features. Two example Feature links are shown
   in the Features Index below; add a third only if the decomposition warrants it.

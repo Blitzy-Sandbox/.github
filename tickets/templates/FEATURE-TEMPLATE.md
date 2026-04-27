@@ -5,7 +5,7 @@ USAGE:
 - Do NOT edit this template in place. Copy this file to
   `tickets/EPIC-NUM/FEATURE-NUM-NN-slug.md` (inside the parent Epic's
   co-located subdirectory) and fill every placeholder.
-- Replace every `[...]` placeholder text and remove every `<!-- TODO: ... -->`
+- Replace every `[...]` placeholder text and delete every TODO authoring
   HTML comment before committing.
 - Features decompose into 2–5 child Stories. Two example Story links are shown
   in the User Stories Index below; add more (up to 5) as the decomposition
